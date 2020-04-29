@@ -8,7 +8,6 @@
 #pragma comment(lib, "user32.lib")
 #pragma comment(lib, "shell32.lib")
 
-
 #define WM_TRAY_CALLBACK_MESSAGE (WM_USER + 1)
 #define WC_TRAY_CLASS_NAME TEXT("MiViGEmClass")
 #define WC_TRAY_MUTEX_NAME TEXT("MI-VIGEM")
@@ -161,7 +160,7 @@ int tray_init(struct tray *tray)
     nid.cbSize = sizeof(NOTIFYICONDATA);
     nid.hWnd = hwnd;
     nid.uID = 0;
-    nid.uFlags = NIF_ICON | NIF_MESSAGE;
+    nid.uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP;
     nid.uCallbackMessage = WM_TRAY_CALLBACK_MESSAGE;
     Shell_NotifyIcon(NIM_ADD, &nid);
 
@@ -195,13 +194,14 @@ void tray_update(struct tray *tray)
     UINT id = ID_TRAY_FIRST;
     hmenu = _tray_menu(tray->menu, &id);
     SendMessage(hwnd, WM_INITMENUPOPUP, (WPARAM)hmenu, 0);
-    HICON icon;
-    ExtractIconEx(tray->icon, 0, NULL, &icon, 1);
+    HICON hicon;
+    ExtractIconEx(tray->icon, 0, NULL, &hicon, 1);
     if (nid.hIcon)
     {
         DestroyIcon(nid.hIcon);
     }
-    nid.hIcon = icon;
+    nid.hIcon = hicon;
+    _tcscpy(nid.szTip, tray->tip);
     Shell_NotifyIcon(NIM_MODIFY, &nid);
 
     if (prevmenu != NULL)
@@ -235,15 +235,43 @@ void tray_register_device_notification(GUID filter, void (*cb)(UINT op, LPTSTR p
         return;
     }
 
-    DEV_BROADCAST_DEVICEINTERFACE nf;
-    memset(&nf, 0, sizeof(nf));
-    nf.dbcc_size = sizeof(nf);
-    nf.dbcc_devicetype = DBT_DEVTYP_DEVICEINTERFACE;
-    nf.dbcc_classguid = filter;
+    DEV_BROADCAST_DEVICEINTERFACE dbdi;
+    memset(&dbdi, 0, sizeof(dbdi));
+    dbdi.dbcc_size = sizeof(dbdi);
+    dbdi.dbcc_devicetype = DBT_DEVTYP_DEVICEINTERFACE;
+    dbdi.dbcc_classguid = filter;
 
-    hdevntf = RegisterDeviceNotification(hwnd, &nf, DEVICE_NOTIFY_WINDOW_HANDLE);
+    hdevntf = RegisterDeviceNotification(hwnd, &dbdi, DEVICE_NOTIFY_WINDOW_HANDLE);
     if (hdevntf != NULL)
     {
         devntf_cb = cb;
     }
+}
+
+void tray_show_notification(UINT type, LPTSTR title, LPTSTR text)
+{
+    if (hwnd == NULL)
+    {
+        return;
+    }
+
+    NOTIFYICONDATA nid_info;
+    memmove(&nid_info, &nid, sizeof(NOTIFYICONDATA));
+    nid_info.uFlags |= NIF_INFO;
+    _tsccpy(nid_info.szInfoTitle, title);
+    _tsccpy(nid_info.szInfo, text);
+    switch (type)
+    {
+    case NT_TRAY_INFO:
+        nid_info.dwInfoFlags = NIIF_INFO;
+        break;
+    case NT_TRAY_WARNING:
+        nid_info.dwInfoFlags = NIIF_WARNING;
+        break;
+    case NT_TRAY_ERROR:
+        nid_info.dwInfoFlags = NIIF_ERROR;
+        break;
+    }
+    nid_info.uTimeout = 10000;
+    Shell_NotifyIcon(NIM_MODIFY, &nid_info);
 }
