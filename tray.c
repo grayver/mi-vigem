@@ -10,12 +10,14 @@
 
 #define WM_TRAY_CALLBACK_MESSAGE (WM_USER + 1)
 #define WC_TRAY_CLASS_NAME TEXT("TRAY")
+#define WC_TRAY_MUTEX_NAME TEXT("MI-VIGEM")
 #define ID_TRAY_FIRST 1000
 
 static WNDCLASSEX wc;
 static NOTIFYICONDATA nid;
 static HWND hwnd;
 static HMENU hmenu = NULL;
+static HANDLE hmutex;
 
 static LRESULT CALLBACK _tray_wnd_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam)
 {
@@ -103,6 +105,12 @@ static HMENU _tray_menu(struct tray_menu *m, UINT *id)
 
 int tray_init(struct tray *tray)
 {
+    hmutex = CreateMutex(NULL, TRUE, WC_TRAY_MUTEX_NAME);
+    if (hmutex == NULL)
+    {
+        return -1;
+    }
+
     memset(&wc, 0, sizeof(wc));
     wc.cbSize = sizeof(WNDCLASSEX);
     wc.lpfnWndProc = _tray_wnd_proc;
@@ -186,4 +194,6 @@ void tray_exit()
     }
     PostQuitMessage(0);
     UnregisterClass(WC_TRAY_CLASS_NAME, GetModuleHandle(NULL));
+    ReleaseMutex(hmutex);
+    CloseHandle(hmutex);
 }
