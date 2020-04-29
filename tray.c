@@ -1,6 +1,7 @@
 #include <tchar.h>
 #include <windows.h>
 #include <shellapi.h>
+#include <dbt.h>
 
 #include "tray.h"
 
@@ -9,21 +10,27 @@
 
 
 #define WM_TRAY_CALLBACK_MESSAGE (WM_USER + 1)
-#define WC_TRAY_CLASS_NAME TEXT("TRAY")
+#define WC_TRAY_CLASS_NAME TEXT("MiViGEmClass")
 #define WC_TRAY_MUTEX_NAME TEXT("MI-VIGEM")
 #define ID_TRAY_FIRST 1000
 
 static WNDCLASSEX wc;
 static NOTIFYICONDATA nid;
-static HWND hwnd;
+static HWND hwnd = NULL;
 static HMENU hmenu = NULL;
 static HANDLE hmutex;
+static HDEVNOTIFY hdevntf;
+static void (*devntf_cb)(UINT op, LPTSTR path) = NULL;
 
 static LRESULT CALLBACK _tray_wnd_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam)
 {
     switch (msg)
     {
     case WM_CLOSE:
+        if (hdevntf != NULL)
+        {
+            UnregisterDeviceNotification(hdevntf);
+        }
         DestroyWindow(hwnd);
         return 0;
     case WM_DESTROY:
@@ -57,6 +64,28 @@ static LRESULT CALLBACK _tray_wnd_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARA
                 }
             }
             return 0;
+        }
+        break;
+    case WM_DEVICECHANGE:
+        if (devntf_cb != NULL)
+        {
+            UINT op = DO_TRAY_UNKNOWN;
+            switch (wparam)
+            {
+            case DBT_DEVICEARRIVAL:
+                op = DO_TRAY_DEV_ATTACHED;
+                break;
+            case DBT_DEVICEREMOVECOMPLETE:
+                op = DO_TRAY_DEV_REMOVED;
+                break;
+            }
+            LPTSTR path = NULL;
+            if (lparam != 0)
+            {
+                PDEV_BROADCAST_DEVICEINTERFACE bdi = (PDEV_BROADCAST_DEVICEINTERFACE)lparam;
+                path = bdi->dbcc_name;
+            }
+            devntf_cb(op, path);
         }
         break;
     }
@@ -140,7 +169,7 @@ int tray_init(struct tray *tray)
     return 0;
 }
 
-int tray_loop(int blocking)
+int tray_loop(BOOLEAN blocking)
 {
     MSG msg;
     if (blocking)
@@ -193,7 +222,28 @@ void tray_exit()
         DestroyMenu(hmenu);
     }
     PostQuitMessage(0);
+    hwnd = NULL;
     UnregisterClass(WC_TRAY_CLASS_NAME, GetModuleHandle(NULL));
     ReleaseMutex(hmutex);
     CloseHandle(hmutex);
+}
+
+void tray_register_device_notification(GUID filter, void (*cb)(UINT op, LPTSTR path))
+{
+    if (hwnd == NULL)
+    {
+        return;
+    }
+
+    DEV_BROADCAST_DEVICEINTERFACE nf;
+    memset(&nf, 0, sizeof(nf));
+    nf.dbcc_size = sizeof(nf);
+    nf.dbcc_devicetype = DBT_DEVTYP_DEVICEINTERFACE;
+    nf.dbcc_classguid = filter;
+
+    hdevntf = RegisterDeviceNotification(hwnd, &nf, DEVICE_NOTIFY_WINDOW_HANDLE);
+    if (hdevntf != NULL)
+    {
+        devntf_cb = cb;
+    }
 }

@@ -7,6 +7,8 @@
 #define TRAY_ICON1 TEXT("icon.ico")
 #define TRAY_ICON2 TEXT("icon.ico")
 
+static const GUID hid_class = { 0x4d1e55b2, 0xf16f, 0x11cf, { 0x88, 0xcb, 0x00, 0x11, 0x11, 0x00, 0x00, 0x30 } };
+
 static struct tray tray;
 
 static void toggle_cb(struct tray_menu *item)
@@ -43,6 +45,11 @@ static void submenu_cb(struct tray_menu *item)
     (void)item;
     printf("submenu: clicked on %s\n", item->text);
     tray_update(&tray);
+}
+
+static void device_cb(UINT op, LPTSTR path)
+{
+    printf("device operation %d with path %s\n", op, path);
 }
 
 // Test tray init
@@ -88,7 +95,8 @@ int main()
         printf("failed to create tray\n");
         return 1;
     }
-    while (tray_loop(1) == 0)
+    tray_register_device_notification(hid_class, &device_cb);
+    while (tray_loop(TRUE) == 0)
     {
         printf("iteration\n");
     }
