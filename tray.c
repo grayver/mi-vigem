@@ -258,8 +258,8 @@ void tray_show_notification(UINT type, LPTSTR title, LPTSTR text)
     NOTIFYICONDATA nid_info;
     memmove(&nid_info, &nid, sizeof(NOTIFYICONDATA));
     nid_info.uFlags |= NIF_INFO;
-    _tsccpy(nid_info.szInfoTitle, title);
-    _tsccpy(nid_info.szInfo, text);
+    _tcscpy(nid_info.szInfoTitle, title);
+    _tcscpy(nid_info.szInfo, text);
     switch (type)
     {
     case NT_TRAY_INFO:
