@@ -23,7 +23,7 @@ const LPTSTR mi_hw_filter = TEXT("VID&00022717_PID&3144");
 #define MI_BUTTON_MI_BTN    0x00004000
 
 #define MI_BREAK_REASON_UNKNOWN        0x0000
-#define MI_BREAK_REASON_UNPLUGGED      0x0001
+#define MI_BREAK_REASON_REQUESTED      0x0001
 #define MI_BREAK_REASON_INIT_ERROR     0x0002
 #define MI_BREAK_REASON_READ_ERROR     0x0004
 #define MI_BREAK_REASON_WRITE_ERROR    0x0008
@@ -31,15 +31,19 @@ const LPTSTR mi_hw_filter = TEXT("VID&00022717_PID&3144");
 struct mi_state
 {
     DWORD buttons;
+    
     BYTE left_stick_x;
     BYTE left_stick_y;
     BYTE right_stick_x;
     BYTE right_stick_y;
+    
     BYTE l2_trigger;
     BYTE r2_trigger;
+    
     WORD accel_x;
     WORD accel_y;
     WORD accel_z;
+
     BYTE battery;
 };
 
