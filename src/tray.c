@@ -194,8 +194,7 @@ void tray_update(struct tray *tray)
     UINT id = ID_TRAY_FIRST;
     hmenu = _tray_menu(tray->menu, &id);
     SendMessage(hwnd, WM_INITMENUPOPUP, (WPARAM)hmenu, 0);
-    HICON hicon;
-    ExtractIconEx(tray->icon, 0, NULL, &hicon, 1);
+    HICON hicon = LoadIcon(wc.hInstance, tray->icon);
     if (nid.hIcon)
     {
         DestroyIcon(nid.hIcon);

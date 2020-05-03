@@ -3,14 +3,28 @@
   "tasks": [
     {
       "type": "shell",
-      "label": "cl.exe build active file",
+      "label": "Compile resources",
+      "command": "rc.exe",
+      "args": [
+        "/foobj/mi-vigem.res",
+        "res/res.rc"
+      ],
+      "group": "build",
+      "problemMatcher": [
+        "$msCompile"
+      ]
+    },
+    {
+      "type": "shell",
+      "label": "Build binary",
       "command": "cl.exe",
       "args": [
         "/Zi",
         "/EHsc",
         "/Foobj/",
         "/Febin/mi-vigem.exe",
-        "*.c"
+        "obj/mi-vigem.res",
+        "src/*.c"
       ],
       "problemMatcher": [
         "$msCompile"

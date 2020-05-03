@@ -4,8 +4,8 @@
 
 #include "tray.h"
 
-#define TRAY_ICON1 TEXT("icon.ico")
-#define TRAY_ICON2 TEXT("icon.ico")
+#define TRAY_ICON1 TEXT("APP_ICON")
+#define TRAY_ICON2 TEXT("APP_ICON")
 
 static const GUID hid_class = { 0x4d1e55b2, 0xf16f, 0x11cf, { 0x88, 0xcb, 0x00, 0x11, 0x11, 0x00, 0x00, 0x30 } };
 
@@ -55,6 +55,7 @@ static void device_cb(UINT op, LPTSTR path)
 // Test tray init
 static struct tray tray = {
     .icon = TRAY_ICON1,
+    .tip = TEXT("Mi-ViGEm"),
     .menu =
         (struct tray_menu[]){
             {.text = "Hello", .cb = hello_cb},

@@ -2,7 +2,7 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "cl.exe build and debug active file",
+            "name": "Build and debug",
             "type": "cppvsdbg",
             "request": "launch",
             "program": "bin/mi-vigem.exe",
@@ -11,7 +11,7 @@
             "cwd": "${workspaceFolder}",
             "environment": [],
             "externalConsole": false,
-            "preLaunchTask": "cl.exe build active file"
+            "preLaunchTask": "Build binary"
         }
     ]
 }
