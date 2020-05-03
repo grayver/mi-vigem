@@ -22,9 +22,9 @@ struct hid_device
     USHORT input_report_size;
     USHORT output_report_size;
     USHORT feature_report_size;
-    void *input_buffer;
-    void *output_buffer;
-    void *feature_buffer;
+    BYTE *input_buffer;
+    BYTE *output_buffer;
+    BYTE *feature_buffer;
 
     OVERLAPPED input_ol;
 };
@@ -33,9 +33,9 @@ struct hid_device_info *hid_enumerate(LPTSTR path_filter);
 BOOL hid_reenable_device(LPTSTR path);
 void hid_free_device_info(struct hid_device_info *device_info);
 struct hid_device *hid_open_device(LPTSTR path, BOOL open_rw);
-int hid_get_input_report(struct hid_device *device, DWORD timeout);
-int hid_send_output_report(struct hid_device *device, const void *data, size_t length);
-int hid_send_feature_report(struct hid_device *device, const void *data, size_t length);
+INT hid_get_input_report(struct hid_device *device, DWORD timeout);
+INT hid_send_output_report(struct hid_device *device, const void *data, size_t length);
+INT hid_send_feature_report(struct hid_device *device, const void *data, size_t length);
 void hid_close_device(struct hid_device *device);
 void hid_free_device(struct hid_device *device);
 

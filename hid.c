@@ -241,9 +241,9 @@ struct hid_device *hid_open_device(LPTSTR path, BOOL open_rw)
     dev->input_report_size = caps.InputReportByteLength;
     dev->output_report_size = caps.OutputReportByteLength;
     dev->feature_report_size = caps.FeatureReportByteLength;
-    dev->input_buffer = malloc(caps.InputReportByteLength);
-    dev->output_buffer = malloc(caps.OutputReportByteLength);
-    dev->feature_buffer = malloc(caps.FeatureReportByteLength);
+    dev->input_buffer = (BYTE *)malloc(caps.InputReportByteLength);
+    dev->output_buffer = (BYTE *)malloc(caps.OutputReportByteLength);
+    dev->feature_buffer = (BYTE *)malloc(caps.FeatureReportByteLength);
 
     HidD_FreePreparsedData(pp_data);
 
@@ -253,7 +253,7 @@ struct hid_device *hid_open_device(LPTSTR path, BOOL open_rw)
     return dev;
 }
 
-int hid_get_input_report(struct hid_device *device, DWORD timeout)
+INT hid_get_input_report(struct hid_device *device, DWORD timeout)
 {
     DWORD bytes_read = 0;
     HANDLE ev = device->input_ol.hEvent;
@@ -297,7 +297,7 @@ int hid_get_input_report(struct hid_device *device, DWORD timeout)
     return -1;
 }
 
-int hid_send_output_report(struct hid_device *device, const void *data, size_t length)
+INT hid_send_output_report(struct hid_device *device, const void *data, size_t length)
 {
     DWORD bytes_written;
     OVERLAPPED ol;
@@ -322,7 +322,7 @@ int hid_send_output_report(struct hid_device *device, const void *data, size_t l
     return -1;
 }
 
-int hid_send_feature_report(struct hid_device *device, const void *data, size_t length)
+INT hid_send_feature_report(struct hid_device *device, const void *data, size_t length)
 {
     if (length <= device->feature_report_size)
     {

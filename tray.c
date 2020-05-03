@@ -228,7 +228,7 @@ void tray_exit()
     CloseHandle(hmutex);
 }
 
-void tray_register_device_notification(GUID filter, void (*cb)(UINT op, LPTSTR path))
+void tray_register_device_notification(GUID filter, void (*cb)(UINT, LPTSTR))
 {
     if (hwnd == NULL)
     {
