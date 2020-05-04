@@ -1,105 +1,225 @@
 #include <stdio.h>
 #include <string.h>
 #include <tchar.h>
+#include <windows.h>
+#include <synchapi.h>
 
 #include "tray.h"
+#include "hid.h"
+#include "mi.h"
 
-#define TRAY_ICON1 TEXT("APP_ICON")
-#define TRAY_ICON2 TEXT("APP_ICON")
+#define MAX_DEVICE_COUNT 16
 
-static const GUID hid_class = { 0x4d1e55b2, 0xf16f, 0x11cf, { 0x88, 0xcb, 0x00, 0x11, 0x11, 0x00, 0x00, 0x30 } };
+static int active_device_count = 0;
+static struct hid_device *active_devices[MAX_DEVICE_COUNT];
+static SRWLOCK active_devices_lock = SRWLOCK_INIT;
 
-static struct tray tray;
+// future declarations
+static void mi_gamepad_update_cb(struct hid_device *device, struct mi_state *state);
+static void mi_gamepad_stop_cb(struct hid_device *device, BYTE break_reason);
+static void quit_cb(struct tray_menu *item);
 
-static void toggle_cb(struct tray_menu *item)
+static const struct tray_menu tray_menu_quit = { .text = "Quit", .cb = quit_cb };
+static const struct tray_menu tray_menu_separator = { .text = "-" };
+static const struct tray_menu tray_menu_terminator = { .text = NULL };
+static struct tray tray =
 {
-    printf("toggle cb\n");
-    item->checked = !item->checked;
-    tray_update(&tray);
+    .icon = TEXT("APP_ICON"),
+    .tip = TEXT("Mi-ViGEm")
+};
+
+static struct hid_device *add_device(LPTSTR path)
+{
+    if (active_device_count == MAX_DEVICE_COUNT)
+    {
+        tray_show_notification(NT_TRAY_WARNING, TEXT("Add new device"),
+                               TEXT("Device count limit reached"));
+        return NULL;
+    }
+
+    struct hid_device *device = hid_open_device(path, FALSE);
+    if (device == NULL)
+    {
+        if (hid_reenable_device(path))
+        {
+            device = hid_open_device(path, FALSE);
+            if (device == NULL)
+            {
+                device = hid_open_device(path, TRUE);
+            }
+        }
+        else
+        {
+            device = hid_open_device(path, TRUE);
+        }
+    }
+
+    if (device == NULL)
+    {
+        tray_show_notification(NT_TRAY_ERROR, TEXT("Add new device"),
+                               TEXT("Error opening new device"));
+        return NULL;
+    }
+
+    AcquireSRWLockExclusive(&active_devices_lock);
+    active_devices[active_device_count++] = device;
+    ReleaseSRWLockExclusive(&active_devices_lock);
+
+    mi_gamepad_start(device, mi_gamepad_update_cb, mi_gamepad_stop_cb);
+    // TODO: add to tray
+    // TODO: show notification
+    return device;
 }
 
-static void hello_cb(struct tray_menu *item)
+static void remove_device(int index)
 {
-    (void)item;
-    printf("hello cb\n");
-    if (_tcscmp(tray.icon, TRAY_ICON1) == 0)
+    AcquireSRWLockExclusive(&active_devices_lock);
+    hid_close_device(active_devices[index]);
+    hid_free_device(active_devices[index]);
+    if (index < active_device_count - 1)
     {
-        tray.icon = TRAY_ICON2;
+        memmove(&active_devices[index], &active_devices[index + 1],
+                sizeof(struct hid_device *) * (active_device_count - index - 1));
     }
-    else
+    active_device_count--;
+    ReleaseSRWLockExclusive(&active_devices_lock);
+}
+
+static void refresh_devices()
+{
+    struct hid_device_info *device_info = hid_enumerate(MI_HW_FILTER);
+    struct hid_device_info *cur;
+    BOOL found = FALSE;
+
+    // remove missing devices
+    AcquireSRWLockShared(&active_devices_lock);
+    for (int i = 0; i < active_device_count; i++)
     {
-        tray.icon = TRAY_ICON1;
+        found = FALSE;
+        cur = device_info;
+        while (cur != NULL)
+        {
+            if (_tcscmp(active_devices[i]->path, cur->path) == 0)
+            {
+                found = TRUE;
+                break;
+            }
+            cur = cur->next;
+        }
+        if (!found)
+        {
+            mi_gamepad_stop(active_devices[i]);
+        }
     }
-    tray_update(&tray);
+    ReleaseSRWLockShared(&active_devices_lock);
+
+    // add new devices
+    cur = device_info;
+    while (cur != NULL)
+    {
+        found = FALSE;
+        AcquireSRWLockShared(&active_devices_lock);
+        for (int i = 0; i < active_device_count; i++)
+        {
+            if (_tcscmp(cur->path, active_devices[i]->path) == 0)
+            {
+                found = TRUE;
+                break;
+            }
+        }
+        ReleaseSRWLockShared(&active_devices_lock);
+        if (!found)
+        {
+            add_device(cur->path);
+        }
+        cur = cur->next;
+    }
+
+    // free hid_device_info list
+    while (device_info)
+    {
+        cur = device_info->next;
+        hid_free_device_info(device_info);
+        device_info = cur;
+    }
+}
+
+static void device_change_cb(UINT op, LPTSTR path)
+{
+    // refresh devices regardless operation type
+    printf("Device operation %d with path %s\n", op, path);
+    refresh_devices();
+}
+
+static void mi_gamepad_update_cb(struct hid_device *device, struct mi_state *state)
+{
+    //
+}
+
+static void mi_gamepad_stop_cb(struct hid_device *device, BYTE break_reason)
+{
+    UINT ntf_type = break_reason == MI_BREAK_REASON_REQUESTED ? NT_TRAY_INFO : NT_TRAY_WARNING;
+    LPTSTR ntf_text;
+    switch (break_reason)
+    {
+    case MI_BREAK_REASON_REQUESTED:
+        ntf_text = TEXT("Device removed successfully");
+        break;
+    case MI_BREAK_REASON_INIT_ERROR:
+        ntf_text = TEXT("Error initializing device");
+        break;
+    case MI_BREAK_REASON_READ_ERROR:
+        ntf_text = TEXT("Error reading data");
+        break;
+    case MI_BREAK_REASON_WRITE_ERROR:
+        ntf_text = TEXT("Error writing data");
+        break;
+    default:
+        ntf_text = TEXT("Unknown error");
+        break;
+    }
+    tray_show_notification(ntf_type, TEXT("Remove device"), ntf_text);
+
+    int index = -1;
+    AcquireSRWLockShared(&active_devices_lock);
+    for (int i = 0; i < active_device_count; i++)
+    {
+        if (_tcscmp(device->path, active_devices[i]->path) == 0)
+        {
+            index = i;
+            break;
+        }
+    }
+    ReleaseSRWLockShared(&active_devices_lock);
+    if (index > -1)
+    {
+        remove_device(index);
+    }
 }
 
 static void quit_cb(struct tray_menu *item)
 {
     (void)item;
-    printf("quit cb\n");
+    printf("Quit\n");
     tray_exit();
 }
 
-static void submenu_cb(struct tray_menu *item)
-{
-    (void)item;
-    printf("submenu: clicked on %s\n", item->text);
-    tray_update(&tray);
-}
-
-static void device_cb(UINT op, LPTSTR path)
-{
-    printf("device operation %d with path %s\n", op, path);
-}
-
-// Test tray init
-static struct tray tray = {
-    .icon = TRAY_ICON1,
-    .tip = TEXT("Mi-ViGEm"),
-    .menu =
-        (struct tray_menu[]){
-            {.text = "Hello", .cb = hello_cb},
-            {.text = "Checked", .checked = 1, .cb = toggle_cb},
-            {.text = "Disabled", .disabled = 1},
-            {.text = "-"},
-            {.text = "SubMenu",
-             .submenu =
-                 (struct tray_menu[]){
-                     {.text = "FIRST", .checked = 1, .cb = submenu_cb},
-                     {.text = "SECOND",
-                      .submenu =
-                          (struct tray_menu[]){
-                              {.text = "THIRD",
-                               .submenu =
-                                   (struct tray_menu[]){
-                                       {.text = "7", .cb = submenu_cb},
-                                       {.text = "-"},
-                                       {.text = "8", .cb = submenu_cb},
-                                       {.text = NULL}}},
-                              {.text = "FOUR",
-                               .submenu =
-                                   (struct tray_menu[]){
-                                       {.text = "5", .cb = submenu_cb},
-                                       {.text = "6", .cb = submenu_cb},
-                                       {.text = NULL}}},
-                              {.text = NULL}}},
-                     {.text = NULL}}},
-            {.text = "-"},
-            {.text = "Quit", .cb = quit_cb},
-            {.text = NULL}},
-};
-
 int main()
 {
+    tray.menu = malloc(2 * sizeof(struct tray_menu));
+    tray.menu[0] = tray_menu_quit;
+    tray.menu[1] = tray_menu_terminator;
+
     if (tray_init(&tray) < 0)
     {
-        printf("failed to create tray\n");
+        printf("Failed to create tray\n");
         return 1;
     }
-    tray_register_device_notification(hid_class, &device_cb);
+    refresh_devices();
+    tray_register_device_notification(hid_get_class(), device_change_cb);
     while (tray_loop(TRUE) == 0)
     {
-        printf("iteration\n");
+        ;
     }
     return 0;
 }

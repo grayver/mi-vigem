@@ -1,4 +1,6 @@
 #include <tchar.h>
+#include <windows.h>
+#include <synchapi.h>
 
 #include "mi.h"
 #include "hid.h"
@@ -13,6 +15,17 @@
 #define MI_VIBRATION_BIG_MOTOR      2
 
 static const BYTE init_vibration[3] = { 0x20, 0x00, 0x00 };
+static const BYTE calibration[24] =
+{
+    0x22, 0xFF,
+    0x00, 0x7f, 0x7f, 0xff, 0x00, 0x7f, 0x7f, 0xff,
+    0x00, 0x7f, 0x7f, 0xff, 0x00, 0x7f, 0x7f, 0xff,
+    0x00, 0x7f, 0xff,
+    0x00, 0x7f, 0xff
+};
+static const BYTE enable_accel[3] = { 0x31, 0x01, 0x08 };
+static const BYTE disable_accel[3] = { 0x31, 0x00, 0x00 };
+
 static const DWORD dpad_map[8] =
 {
     MI_BUTTON_UP,
@@ -260,6 +273,11 @@ void mi_gamepad_set_vibration(struct hid_device *device, BYTE small_motor, BYTE 
         cur_gp = cur_gp->next;
     }
     ReleaseSRWLockShared(&gp_lock);
+}
+
+void mi_gamepad_calibrate(struct hid_device *device)
+{
+    hid_send_feature_report(device, calibration, sizeof(calibration));
 }
 
 void mi_gamepad_stop(struct hid_device *device)

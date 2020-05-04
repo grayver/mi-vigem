@@ -3,7 +3,7 @@
 
 #include <wtypes.h>
 
-const LPTSTR mi_hw_filter = TEXT("VID&00022717_PID&3144");
+#define MI_HW_FILTER TEXT("VID&00022717_PID&3144")
 
 #define MI_BUTTON_NONE      0x00000000
 #define MI_BUTTON_A         0x00000001
@@ -50,6 +50,7 @@ struct mi_state
 void mi_gamepad_start(struct hid_device *device, void (*upd_cb)(struct hid_device *, struct mi_state *),
                       void (*stop_cb)(struct hid_device *, BYTE));
 void mi_gamepad_set_vibration(struct hid_device *device, BYTE small_motor, BYTE big_motor);
+void mi_gamepad_calibrate(struct hid_device *device);
 void mi_gamepad_stop(struct hid_device *device);
 
 #endif /* MI_H */
