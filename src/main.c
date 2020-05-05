@@ -148,12 +148,18 @@ static void device_change_cb(UINT op, LPTSTR path)
 {
     // refresh devices regardless operation type
     printf("Device operation %d with path %s\n", op, path);
+    fflush(stdout);
     refresh_devices();
 }
 
 static void mi_gamepad_update_cb(struct hid_device *device, struct mi_state *state)
 {
-    //
+    printf("Up: %d down: %d left: %d right: %d\n",
+           state->buttons & MI_BUTTON_UP > 0 ? 1 : 0,
+           state->buttons & MI_BUTTON_DOWN > 0 ? 1 : 0,
+           state->buttons & MI_BUTTON_LEFT > 0 ? 1 : 0,
+           state->buttons & MI_BUTTON_RIGHT > 0 ? 1 : 0);
+    fflush(stdout);
 }
 
 static void mi_gamepad_stop_cb(struct hid_device *device, BYTE break_reason)
@@ -201,6 +207,7 @@ static void quit_cb(struct tray_menu *item)
 {
     (void)item;
     printf("Quit\n");
+    fflush(stdout);
     tray_exit();
 }
 
@@ -221,5 +228,7 @@ int main()
     {
         ;
     }
+
+    free(tray.menu);
     return 0;
 }

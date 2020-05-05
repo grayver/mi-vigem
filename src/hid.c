@@ -6,6 +6,7 @@
 #include <devpkey.h>
 
 #include "hid.h"
+#include "utils.h"
 
 #pragma comment(lib, "kernel32.lib")
 #pragma comment(lib, "hid.lib")
@@ -61,7 +62,7 @@ struct hid_device_info *hid_enumerate(LPTSTR path_filter)
 
             if (SetupDiGetDeviceInterfaceDetail(device_info_set, &device_interface_data, device_interface_detail_data, required_size, NULL, NULL))
             {
-                if (path_filter == NULL || _tcsstr(device_interface_detail_data->DevicePath, path_filter) != NULL)
+                if (path_filter == NULL || _tcsistr(device_interface_detail_data->DevicePath, path_filter) != NULL)
                 {
                     desc_buffer = NULL;
 
