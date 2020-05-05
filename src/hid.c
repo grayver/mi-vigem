@@ -90,7 +90,8 @@ struct hid_device_info *hid_enumerate(LPTSTR path_filter)
                             free(desc_buffer);
                         }
                         if (SetupDiGetDeviceRegistryProperty(device_info_set, &devinfo_data, SPDRP_DEVICEDESC,
-                                                             NULL, NULL, 0, &required_size))
+                                                             NULL, NULL, 0, &required_size)
+                            || GetLastError() == ERROR_INSUFFICIENT_BUFFER)
                         {
                             desc_buffer = (LPTSTR)malloc(required_size);
                             memset(desc_buffer, 0, required_size);
@@ -304,8 +305,8 @@ INT hid_send_output_report(struct hid_device *device, const void *data, size_t l
     OVERLAPPED ol;
     memset(&ol, 0, sizeof(OVERLAPPED));
 
-    memset(&device->output_buffer, 0x0, device->output_report_size);
-    memmove(&device->output_buffer, data, length > device->output_report_size ? device->output_report_size : length);
+    memset(device->output_buffer, 0x0, device->output_report_size);
+    memmove(device->output_buffer, data, length > device->output_report_size ? device->output_report_size : length);
 
     if (!WriteFile(device->handle, device->output_buffer, device->output_report_size, &bytes_written, &ol))
     {
@@ -327,18 +328,17 @@ INT hid_send_feature_report(struct hid_device *device, const void *data, size_t 
 {
     if (length <= device->feature_report_size)
     {
-        if (HidD_SetFeature(device->handle, (PVOID)data, length))
-        {
-            return length;
-        }
+        memset(device->feature_buffer, 0, device->feature_report_size);
+        memmove(device->feature_buffer, data, length);
+
     }
     else
     {
-        memmove(&device->feature_buffer, data, device->feature_report_size);
-        if (HidD_SetFeature(device->handle, (PVOID)device->feature_buffer, device->feature_report_size))
-        {
-            return device->feature_report_size;
-        }
+        memmove(device->feature_buffer, data, device->feature_report_size);
+    }
+    if (HidD_SetFeature(device->handle, (PVOID)device->feature_buffer, device->feature_report_size))
+    {
+        return length < device->feature_report_size ? length : device->feature_report_size;
     }
     return -1;
 }

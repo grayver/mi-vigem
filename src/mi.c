@@ -182,13 +182,13 @@ static DWORD WINAPI _mi_output_thread_proc(LPVOID lparam)
     return 0;
 }
 
-void mi_gamepad_start(struct hid_device *device, void (*upd_cb)(struct hid_device *, struct mi_state *),
+BOOL mi_gamepad_start(struct hid_device *device, void (*upd_cb)(struct hid_device *, struct mi_state *),
                       void (*stop_cb)(struct hid_device *, BYTE))
 {
     if (hid_send_feature_report(device, init_vibration, sizeof(init_vibration)) <= 0)
     {
         stop_cb(device, MI_BREAK_REASON_INIT_ERROR);
-        return;
+        return FALSE;
     }
 
     struct mi_gamepad *gp = (struct mi_gamepad *)malloc(sizeof(struct mi_gamepad));
@@ -248,12 +248,13 @@ void mi_gamepad_start(struct hid_device *device, void (*upd_cb)(struct hid_devic
         free(gp);
         ReleaseSRWLockExclusive(&gp_lock);
         stop_cb(device, MI_BREAK_REASON_INIT_ERROR);
-        return;
+        return FALSE;
     }
 
     ReleaseSRWLockExclusive(&gp_lock);
     ResumeThread(gp->in_thread);
     ResumeThread(gp->out_thread);
+    return TRUE;
 }
 
 void mi_gamepad_set_vibration(struct hid_device *device, BYTE small_motor, BYTE big_motor)

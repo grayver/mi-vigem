@@ -17,8 +17,10 @@ static SRWLOCK active_devices_lock = SRWLOCK_INIT;
 // future declarations
 static void mi_gamepad_update_cb(struct hid_device *device, struct mi_state *state);
 static void mi_gamepad_stop_cb(struct hid_device *device, BYTE break_reason);
+static void refresh_cb(struct tray_menu *item);
 static void quit_cb(struct tray_menu *item);
 
+static const struct tray_menu tray_menu_refresh = { .text = "Refresh", .cb = refresh_cb };
 static const struct tray_menu tray_menu_quit = { .text = "Quit", .cb = quit_cb };
 static const struct tray_menu tray_menu_separator = { .text = "-" };
 static const struct tray_menu tray_menu_terminator = { .text = NULL };
@@ -28,13 +30,13 @@ static struct tray tray =
     .tip = TEXT("Mi-ViGEm")
 };
 
-static struct hid_device *add_device(LPTSTR path)
+static BOOL add_device(LPTSTR path)
 {
     if (active_device_count == MAX_DEVICE_COUNT)
     {
         tray_show_notification(NT_TRAY_WARNING, TEXT("Add new device"),
                                TEXT("Device count limit reached"));
-        return NULL;
+        return FALSE;
     }
 
     struct hid_device *device = hid_open_device(path, FALSE);
@@ -58,30 +60,37 @@ static struct hid_device *add_device(LPTSTR path)
     {
         tray_show_notification(NT_TRAY_ERROR, TEXT("Add new device"),
                                TEXT("Error opening new device"));
-        return NULL;
+        return FALSE;
     }
 
     AcquireSRWLockExclusive(&active_devices_lock);
     active_devices[active_device_count++] = device;
     ReleaseSRWLockExclusive(&active_devices_lock);
 
-    mi_gamepad_start(device, mi_gamepad_update_cb, mi_gamepad_stop_cb);
+    if (!mi_gamepad_start(device, mi_gamepad_update_cb, mi_gamepad_stop_cb))
+    {
+        return FALSE;
+    }
+    
     // TODO: add to tray
     // TODO: show notification
-    return device;
+    return TRUE;
 }
 
 static void remove_device(int index)
 {
     AcquireSRWLockExclusive(&active_devices_lock);
-    hid_close_device(active_devices[index]);
-    hid_free_device(active_devices[index]);
-    if (index < active_device_count - 1)
+    if (index < active_device_count)
     {
-        memmove(&active_devices[index], &active_devices[index + 1],
-                sizeof(struct hid_device *) * (active_device_count - index - 1));
+        hid_close_device(active_devices[index]);
+        hid_free_device(active_devices[index]);
+        if (index < active_device_count - 1)
+        {
+            memmove(&active_devices[index], &active_devices[index + 1],
+                    sizeof(struct hid_device *) * (active_device_count - index - 1));
+        }
+        active_device_count--;
     }
-    active_device_count--;
     ReleaseSRWLockExclusive(&active_devices_lock);
 }
 
@@ -203,6 +212,14 @@ static void mi_gamepad_stop_cb(struct hid_device *device, BYTE break_reason)
     }
 }
 
+static void refresh_cb(struct tray_menu *item)
+{
+    (void)item;
+    printf("Refresh\n");
+    fflush(stdout);
+    refresh_devices();
+}
+
 static void quit_cb(struct tray_menu *item)
 {
     (void)item;
@@ -213,9 +230,11 @@ static void quit_cb(struct tray_menu *item)
 
 int main()
 {
-    tray.menu = malloc(2 * sizeof(struct tray_menu));
-    tray.menu[0] = tray_menu_quit;
-    tray.menu[1] = tray_menu_terminator;
+    tray.menu = malloc(4 * sizeof(struct tray_menu));
+    tray.menu[0] = tray_menu_refresh;
+    tray.menu[1] = tray_menu_separator;
+    tray.menu[2] = tray_menu_quit;
+    tray.menu[3] = tray_menu_terminator;
 
     if (tray_init(&tray) < 0)
     {
