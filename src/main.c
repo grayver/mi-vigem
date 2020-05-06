@@ -8,12 +8,15 @@
 #include "hid.h"
 #include "mi.h"
 
-#define MAX_ACTIVE_DEVICE_COUNT 16
-#define ACTIVE_DEVICE_MENU_TEMPLATE TEXT("#%d Xiaomi Gamepad")
+#define MAX_ACTIVE_DEVICE_COUNT 4
+#define ACTIVE_DEVICE_MENU_TEMPLATE TEXT("#%d Xiaomi Gamepad (batt. %s)")
+#define BATTERY_NA_TEXT TEXT("N/A")
 
 struct active_device
 {
     struct hid_device *device;
+    int index;
+    int battery_level;
     LPTSTR tray_text;
     struct tray_menu *tray_menu;
 };
@@ -109,10 +112,11 @@ static BOOL add_device(LPTSTR path)
 
     struct active_device* active_device = (struct active_device *)malloc(sizeof(struct active_device));
     active_device->device = device;
-    int active_device_index = ++last_active_device_index;
-    int tray_text_length = _sctprintf(ACTIVE_DEVICE_MENU_TEMPLATE, active_device_index);
+    active_device->index = ++last_active_device_index;
+    active_device->battery_level = -1;
+    int tray_text_length = _sctprintf(ACTIVE_DEVICE_MENU_TEMPLATE, active_device->index, BATTERY_NA_TEXT);
     active_device->tray_text = (LPTSTR)malloc((tray_text_length + 1) * sizeof(TCHAR));
-    _stprintf(active_device->tray_text, ACTIVE_DEVICE_MENU_TEMPLATE, active_device_index);
+    _stprintf(active_device->tray_text, ACTIVE_DEVICE_MENU_TEMPLATE, active_device->index, BATTERY_NA_TEXT);
     active_device->tray_menu = (struct tray_menu *)malloc(sizeof(struct tray_menu));
     memset(active_device->tray_menu, 0, sizeof(struct tray_menu));
     active_device->tray_menu->text = active_device->tray_text;
@@ -223,6 +227,29 @@ static void device_change_cb(UINT op, LPTSTR path)
 
 static void mi_gamepad_update_cb(struct hid_device *device, struct mi_state *state)
 {
+    AcquireSRWLockShared(&active_devices_lock);
+    for (int i = 0; i < active_device_count; i++)
+    {
+        if (_tcscmp(device->path, active_devices[i]->device->path) == 0)
+        {
+            if (active_devices[i]->battery_level != state->battery)
+            {
+                active_devices[i]->battery_level = state->battery;
+                TCHAR battery_buffer[5];
+                _stprintf(battery_buffer, TEXT("%d%%"), active_devices[i]->battery_level);
+                int tray_text_length = _sctprintf(ACTIVE_DEVICE_MENU_TEMPLATE, active_devices[i]->index, battery_buffer);
+                free(active_devices[i]->tray_text);
+                active_devices[i]->tray_text = (LPTSTR)malloc((tray_text_length + 1) * sizeof(TCHAR));
+                _stprintf(active_devices[i]->tray_text, ACTIVE_DEVICE_MENU_TEMPLATE, active_devices[i]->index, battery_buffer);
+                active_devices[i]->tray_menu->text = active_devices[i]->tray_text;
+                rebuild_tray_menu();
+                tray_update(&tray);
+            }
+            break;
+        }
+    }
+    ReleaseSRWLockShared(&active_devices_lock);
+
     printf("A: %d B: %d X: %d Y: %d UP: %d DOWN: %d LEFT: %d RIGHT: %d\n",
            (state->buttons & MI_BUTTON_A) > 0 ? 1 : 0,
            (state->buttons & MI_BUTTON_B) > 0 ? 1 : 0,
