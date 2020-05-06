@@ -187,7 +187,6 @@ BOOL mi_gamepad_start(struct hid_device *device, void (*upd_cb)(struct hid_devic
 {
     if (hid_send_feature_report(device, init_vibration, sizeof(init_vibration)) <= 0)
     {
-        stop_cb(device, MI_BREAK_REASON_INIT_ERROR);
         return FALSE;
     }
 
@@ -200,24 +199,6 @@ BOOL mi_gamepad_start(struct hid_device *device, void (*upd_cb)(struct hid_devic
     gp->small_motor = init_vibration[MI_VIBRATION_SMALL_MOTOR];
     gp->big_motor = init_vibration[MI_VIBRATION_BIG_MOTOR];
     gp->next = NULL;
-
-    AcquireSRWLockExclusive(&gp_lock);
-
-    if (root_gp == NULL)
-    {
-        root_gp = gp;
-        gp->prev = NULL;
-    }
-    else
-    {
-        struct mi_gamepad *cur_gp = root_gp;
-        while (cur_gp->next != NULL)
-        {
-            cur_gp = cur_gp->next;
-        }
-        cur_gp->next = gp;
-        gp->prev = cur_gp;
-    }
 
     SECURITY_ATTRIBUTES security = {
         .nLength = sizeof(SECURITY_ATTRIBUTES),
@@ -235,23 +216,28 @@ BOOL mi_gamepad_start(struct hid_device *device, void (*upd_cb)(struct hid_devic
         {
             CloseHandle(gp->out_thread);
         }
-
-        if (gp->prev == NULL)
-        {
-            root_gp = NULL;
-        }
-        else
-        {
-            gp->prev->next = NULL;
-        }
-
         free(gp);
-        ReleaseSRWLockExclusive(&gp_lock);
-        stop_cb(device, MI_BREAK_REASON_INIT_ERROR);
         return FALSE;
     }
 
+    AcquireSRWLockExclusive(&gp_lock);
+    if (root_gp == NULL)
+    {
+        root_gp = gp;
+        gp->prev = NULL;
+    }
+    else
+    {
+        struct mi_gamepad *cur_gp = root_gp;
+        while (cur_gp->next != NULL)
+        {
+            cur_gp = cur_gp->next;
+        }
+        cur_gp->next = gp;
+        gp->prev = cur_gp;
+    }
     ReleaseSRWLockExclusive(&gp_lock);
+
     ResumeThread(gp->in_thread);
     ResumeThread(gp->out_thread);
     return TRUE;
@@ -265,15 +251,18 @@ void mi_gamepad_set_vibration(struct hid_device *device, BYTE small_motor, BYTE 
     {
         if (_tcscmp(device->path, cur_gp->device->path) == 0)
         {
-            AcquireSRWLockExclusive(&cur_gp->vibr_lock);
-            cur_gp->small_motor = small_motor;
-            cur_gp->big_motor = big_motor;
-            ReleaseSRWLockExclusive(&cur_gp->vibr_lock);
             break;
         }
         cur_gp = cur_gp->next;
     }
     ReleaseSRWLockShared(&gp_lock);
+    if (cur_gp != NULL)
+    {
+        AcquireSRWLockExclusive(&cur_gp->vibr_lock);
+        cur_gp->small_motor = small_motor;
+        cur_gp->big_motor = big_motor;
+        ReleaseSRWLockExclusive(&cur_gp->vibr_lock);
+    }
 }
 
 void mi_gamepad_calibrate(struct hid_device *device)

@@ -8,10 +8,19 @@
 #include "hid.h"
 #include "mi.h"
 
-#define MAX_DEVICE_COUNT 16
+#define MAX_ACTIVE_DEVICE_COUNT 16
+#define ACTIVE_DEVICE_MENU_TEMPLATE TEXT("#%d Xiaomi Gamepad")
 
+struct active_device
+{
+    struct hid_device *device;
+    LPTSTR tray_text;
+    struct tray_menu *tray_menu;
+};
+
+static int last_active_device_index = 0;
 static int active_device_count = 0;
-static struct hid_device *active_devices[MAX_DEVICE_COUNT];
+static struct active_device *active_devices[MAX_ACTIVE_DEVICE_COUNT];
 static SRWLOCK active_devices_lock = SRWLOCK_INIT;
 
 // future declarations
@@ -27,71 +36,119 @@ static const struct tray_menu tray_menu_terminator = { .text = NULL };
 static struct tray tray =
 {
     .icon = TEXT("APP_ICON"),
-    .tip = TEXT("Mi-ViGEm")
+    .tip = TEXT("Mi-ViGEm"),
+    .menu = NULL
 };
+
+static void rebuild_tray_menu()
+{
+    struct tray_menu *prev_menu = tray.menu;
+
+    AcquireSRWLockShared(&active_devices_lock);
+    int dyn_item_count = active_device_count > 0 ? active_device_count + 1 : 0;
+    struct tray_menu *new_menu = (struct tray_menu *)malloc((dyn_item_count + 3) * sizeof(struct tray_menu));
+    int index = 0;
+    for (; index < active_device_count; index++)
+    {
+        new_menu[index] = *active_devices[index]->tray_menu;
+    }
+    ReleaseSRWLockShared(&active_devices_lock);
+    if (dyn_item_count > 0)
+    {
+        new_menu[index++] = tray_menu_separator;
+    }
+    new_menu[index++] = tray_menu_refresh;
+    new_menu[index++] = tray_menu_quit;
+    new_menu[index++] = tray_menu_terminator;
+
+    tray.menu = new_menu;
+    free(prev_menu);
+}
 
 static BOOL add_device(LPTSTR path)
 {
-    if (active_device_count == MAX_DEVICE_COUNT)
+    if (active_device_count == MAX_ACTIVE_DEVICE_COUNT)
     {
         tray_show_notification(NT_TRAY_WARNING, TEXT("Add new device"),
                                TEXT("Device count limit reached"));
         return FALSE;
     }
 
-    struct hid_device *device = hid_open_device(path, FALSE);
+    struct hid_device *device = hid_open_device(path, TRUE, FALSE);
     if (device == NULL)
     {
         if (hid_reenable_device(path))
         {
-            device = hid_open_device(path, FALSE);
+            device = hid_open_device(path, TRUE, FALSE);
             if (device == NULL)
             {
-                device = hid_open_device(path, TRUE);
+                device = hid_open_device(path, TRUE, TRUE);
             }
         }
         else
         {
-            device = hid_open_device(path, TRUE);
+            device = hid_open_device(path, TRUE, TRUE);
         }
     }
 
     if (device == NULL)
     {
-        tray_show_notification(NT_TRAY_ERROR, TEXT("Add new device"),
+        tray_show_notification(NT_TRAY_WARNING, TEXT("Add new device"),
                                TEXT("Error opening new device"));
         return FALSE;
     }
 
-    AcquireSRWLockExclusive(&active_devices_lock);
-    active_devices[active_device_count++] = device;
-    ReleaseSRWLockExclusive(&active_devices_lock);
-
     if (!mi_gamepad_start(device, mi_gamepad_update_cb, mi_gamepad_stop_cb))
     {
+        tray_show_notification(NT_TRAY_WARNING, TEXT("Add new device"),
+                               TEXT("Error initializing new device"));
+        hid_close_device(device);
+        hid_free_device(device);
         return FALSE;
     }
-    
-    // TODO: add to tray
-    // TODO: show notification
+
+    struct active_device* active_device = (struct active_device *)malloc(sizeof(struct active_device));
+    active_device->device = device;
+    int active_device_index = ++last_active_device_index;
+    int tray_text_length = _sctprintf(ACTIVE_DEVICE_MENU_TEMPLATE, active_device_index);
+    active_device->tray_text = (LPTSTR)malloc(tray_text_length * sizeof(TCHAR));
+    _stprintf(active_device->tray_text, ACTIVE_DEVICE_MENU_TEMPLATE, active_device_index);
+    active_device->tray_menu = (struct tray_menu *)malloc(sizeof(struct tray_menu));
+    memset(active_device->tray_menu, 0, sizeof(struct tray_menu));
+    active_device->tray_menu->text = active_device->tray_text;
+    AcquireSRWLockExclusive(&active_devices_lock);
+    active_devices[active_device_count++] = active_device;
+    ReleaseSRWLockExclusive(&active_devices_lock);
+
+    rebuild_tray_menu();
+    tray_show_notification(NT_TRAY_INFO, TEXT("Add new device"),
+                           TEXT("Device added successfully"));
     return TRUE;
 }
 
-static void remove_device(int index)
+static BOOL remove_device(LPTSTR path)
 {
     AcquireSRWLockExclusive(&active_devices_lock);
-    if (index < active_device_count)
+    for (int i = 0; i < active_device_count; i++)
     {
-        hid_close_device(active_devices[index]);
-        hid_free_device(active_devices[index]);
-        if (index < active_device_count - 1)
+        if (_tcscmp(path, active_devices[i]->device->path) == 0)
         {
-            memmove(&active_devices[index], &active_devices[index + 1],
-                    sizeof(struct hid_device *) * (active_device_count - index - 1));
+            hid_close_device(active_devices[i]->device);
+            hid_free_device(active_devices[i]->device);
+            free(active_devices[i]->tray_menu);
+            free(active_devices[i]->tray_text);
+            free(active_devices[i]);
+            if (i < active_device_count - 1)
+            {
+                memmove(&active_devices[i], &active_devices[i + 1],
+                        sizeof(struct active_device *) * (active_device_count - i - 1));
+            }
+            active_device_count--;
+            return TRUE;
         }
-        active_device_count--;
     }
     ReleaseSRWLockExclusive(&active_devices_lock);
+    return FALSE;
 }
 
 static void refresh_devices()
@@ -108,7 +165,7 @@ static void refresh_devices()
         cur = device_info;
         while (cur != NULL)
         {
-            if (_tcscmp(active_devices[i]->path, cur->path) == 0)
+            if (_tcscmp(active_devices[i]->device->path, cur->path) == 0)
             {
                 found = TRUE;
                 break;
@@ -117,7 +174,7 @@ static void refresh_devices()
         }
         if (!found)
         {
-            mi_gamepad_stop(active_devices[i]);
+            mi_gamepad_stop(active_devices[i]->device);
         }
     }
     ReleaseSRWLockShared(&active_devices_lock);
@@ -130,7 +187,7 @@ static void refresh_devices()
         AcquireSRWLockShared(&active_devices_lock);
         for (int i = 0; i < active_device_count; i++)
         {
-            if (_tcscmp(cur->path, active_devices[i]->path) == 0)
+            if (_tcscmp(cur->path, active_devices[i]->device->path) == 0)
             {
                 found = TRUE;
                 break;
@@ -194,22 +251,7 @@ static void mi_gamepad_stop_cb(struct hid_device *device, BYTE break_reason)
         break;
     }
     tray_show_notification(ntf_type, TEXT("Remove device"), ntf_text);
-
-    int index = -1;
-    AcquireSRWLockShared(&active_devices_lock);
-    for (int i = 0; i < active_device_count; i++)
-    {
-        if (_tcscmp(device->path, active_devices[i]->path) == 0)
-        {
-            index = i;
-            break;
-        }
-    }
-    ReleaseSRWLockShared(&active_devices_lock);
-    if (index > -1)
-    {
-        remove_device(index);
-    }
+    remove_device(device->path);
 }
 
 static void refresh_cb(struct tray_menu *item)
@@ -230,12 +272,7 @@ static void quit_cb(struct tray_menu *item)
 
 int main()
 {
-    tray.menu = malloc(4 * sizeof(struct tray_menu));
-    tray.menu[0] = tray_menu_refresh;
-    tray.menu[1] = tray_menu_separator;
-    tray.menu[2] = tray_menu_quit;
-    tray.menu[3] = tray_menu_terminator;
-
+    rebuild_tray_menu();
     if (tray_init(&tray) < 0)
     {
         printf("Failed to create tray\n");
@@ -243,11 +280,23 @@ int main()
     }
     refresh_devices();
     tray_register_device_notification(hid_get_class(), device_change_cb);
+
     while (tray_loop(TRUE) == 0)
     {
         ;
     }
 
+    AcquireSRWLockExclusive(&active_devices_lock);
+    for (int i = 0; i < active_device_count; i++)
+    {
+        hid_close_device(active_devices[i]->device);
+        hid_free_device(active_devices[i]->device);
+        free(active_devices[i]->tray_menu);
+        free(active_devices[i]->tray_text);
+        free(active_devices[i]);
+    }
+    active_device_count = 0;
+    ReleaseSRWLockExclusive(&active_devices_lock);
     free(tray.menu);
     return 0;
 }

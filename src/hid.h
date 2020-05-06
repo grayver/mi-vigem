@@ -33,7 +33,7 @@ GUID hid_get_class();
 struct hid_device_info *hid_enumerate(LPTSTR path_filter);
 BOOL hid_reenable_device(LPTSTR path);
 void hid_free_device_info(struct hid_device_info *device_info);
-struct hid_device *hid_open_device(LPTSTR path, BOOL open_rw);
+struct hid_device *hid_open_device(LPTSTR path, BOOL access_rw, BOOL shared);
 INT hid_get_input_report(struct hid_device *device, DWORD timeout);
 INT hid_send_output_report(struct hid_device *device, const void *data, size_t length);
 INT hid_send_feature_report(struct hid_device *device, const void *data, size_t length);

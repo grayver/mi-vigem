@@ -4,6 +4,7 @@
 #include <hidsdi.h>
 #include <setupapi.h>
 #include <devpkey.h>
+#include <cfgmgr32.h>
 
 #include "hid.h"
 #include "utils.h"
@@ -11,6 +12,7 @@
 #pragma comment(lib, "kernel32.lib")
 #pragma comment(lib, "hid.lib")
 #pragma comment(lib, "setupapi.lib")
+#pragma comment(lib, "cfgmgr32.lib")
 
 static BOOL got_hid_class = FALSE;
 static GUID hid_class;
@@ -135,67 +137,74 @@ BOOL hid_reenable_device(LPTSTR path)
 {
     GUID class_guid = hid_get_class();
     SP_DEVINFO_DATA devinfo_data;
-    SP_DEVICE_INTERFACE_DATA device_interface_data;
-    SP_DEVICE_INTERFACE_DETAIL_DATA *device_interface_detail_data = NULL;
     HDEVINFO device_info_set = INVALID_HANDLE_VALUE;
     DWORD required_size = 0;
+    LPWSTR path_w;
+    LPTSTR inst_id = NULL;
 
     memset(&devinfo_data, 0x0, sizeof(devinfo_data));
     devinfo_data.cbSize = sizeof(SP_DEVINFO_DATA);
-    device_interface_data.cbSize = sizeof(SP_DEVICE_INTERFACE_DATA);
 
-    device_info_set = SetupDiGetClassDevs(&class_guid, NULL, NULL, DIGCF_PRESENT | DIGCF_DEVICEINTERFACE);
-    if (device_info_set == INVALID_HANDLE_VALUE)
+#ifdef UNICODE
+    path_w = path;
+#else
+    int path_length = strlen(path);
+    path_w = malloc(path_length * sizeof(WCHAR));
+    MultiByteToWideChar(CP_ACP, 0, path, -1, path_w, path_length);
+#endif /* UNICODE */
+
+    DEVPROPTYPE prop_type;
+    CM_Get_Device_Interface_PropertyW(path_w, &DEVPKEY_Device_InstanceId, &prop_type, NULL, &required_size, 0);
+    LPWSTR inst_id_w = (LPWSTR)malloc(required_size);
+    if (CM_Get_Device_Interface_PropertyW(path_w, &DEVPKEY_Device_InstanceId, &prop_type, (PBYTE)inst_id_w, &required_size, 0) != CR_SUCCESS)
     {
+        free(inst_id_w);
         return FALSE;
     }
 
-    DWORD device_index = 0;
-    while (SetupDiEnumDeviceInfo(device_info_set, device_index, &devinfo_data))
+#ifdef UNICODE
+    inst_id = inst_id_w;
+#else
+    free(path_w);
+    int inst_id_size = WideCharToMultiByte(CP_ACP, 0, inst_id_w, -1, inst_id, 0, NULL, NULL);
+    inst_id = (LPSTR)malloc(inst_id_size);
+    WideCharToMultiByte(CP_ACP, 0, inst_id_w, -1, inst_id, inst_id_size, NULL, NULL);
+    free(inst_id_w);
+#endif /* UNICODE */
+
+    device_info_set = SetupDiGetClassDevs(&class_guid, inst_id, NULL, DIGCF_PRESENT | DIGCF_DEVICEINTERFACE);
+    if (device_info_set == INVALID_HANDLE_VALUE)
     {
-        DWORD device_interface_index = 0;
-        while (SetupDiEnumDeviceInterfaces(device_info_set, &devinfo_data, &class_guid, device_interface_index, &device_interface_data))
-        {
-            SetupDiGetDeviceInterfaceDetail(device_info_set, &device_interface_data, NULL, 0, &required_size, NULL);
-            device_interface_detail_data = (SP_DEVICE_INTERFACE_DETAIL_DATA *)malloc(required_size);
-            device_interface_detail_data->cbSize = sizeof(SP_DEVICE_INTERFACE_DETAIL_DATA);
-
-            if (SetupDiGetDeviceInterfaceDetail(device_info_set, &device_interface_data, device_interface_detail_data, required_size, NULL, NULL))
-            {
-                if (_tcscmp(device_interface_detail_data->DevicePath, path) == 0)
-                {
-                    SP_PROPCHANGE_PARAMS pc_params = {
-                        .ClassInstallHeader = {
-                            .cbSize = sizeof(SP_CLASSINSTALL_HEADER),
-                            .InstallFunction = DIF_PROPERTYCHANGE},
-                        .StateChange = DICS_DISABLE,
-                        .Scope = DICS_FLAG_GLOBAL,
-                        .HwProfile = 0};
-                    BOOL res;
-                    res = SetupDiSetClassInstallParams(device_info_set, &devinfo_data, (PSP_CLASSINSTALL_HEADER)&pc_params,
-                                                       sizeof(SP_PROPCHANGE_PARAMS));
-                    res = res && SetupDiCallClassInstaller(DIF_PROPERTYCHANGE, device_info_set, &devinfo_data);
-                    pc_params.StateChange = DICS_ENABLE;
-                    res = res && SetupDiSetClassInstallParams(device_info_set, &devinfo_data, (PSP_CLASSINSTALL_HEADER)&pc_params,
-                                                              sizeof(SP_PROPCHANGE_PARAMS));
-                    res = res && SetupDiCallClassInstaller(DIF_PROPERTYCHANGE, device_info_set, &devinfo_data);
-                    free(device_interface_detail_data);
-                    SetupDiDestroyDeviceInfoList(device_info_set);
-                    return res;
-                }
-            }
-
-            free(device_interface_detail_data);
-
-            device_interface_index++;
-        }
-
-        device_index++;
+        free(inst_id);
+        return FALSE;
     }
 
-    SetupDiDestroyDeviceInfoList(device_info_set);
+    if (!SetupDiEnumDeviceInfo(device_info_set, 0, &devinfo_data) || SetupDiEnumDeviceInfo(device_info_set, 1, &devinfo_data))
+    {
+        free(inst_id);
+        SetupDiDestroyDeviceInfoList(device_info_set);
+        return FALSE;
+    }
 
-    return FALSE;
+    SP_PROPCHANGE_PARAMS pc_params = {
+        .ClassInstallHeader = {
+            .cbSize = sizeof(SP_CLASSINSTALL_HEADER),
+            .InstallFunction = DIF_PROPERTYCHANGE},
+        .StateChange = DICS_DISABLE,
+        .Scope = DICS_FLAG_GLOBAL,
+        .HwProfile = 0};
+    BOOL res;
+    res = SetupDiSetClassInstallParams(device_info_set, &devinfo_data, (PSP_CLASSINSTALL_HEADER)&pc_params,
+                                        sizeof(SP_PROPCHANGE_PARAMS));
+    res = res && SetupDiCallClassInstaller(DIF_PROPERTYCHANGE, device_info_set, &devinfo_data);
+    pc_params.StateChange = DICS_ENABLE;
+    res = res && SetupDiSetClassInstallParams(device_info_set, &devinfo_data, (PSP_CLASSINSTALL_HEADER)&pc_params,
+                                                sizeof(SP_PROPCHANGE_PARAMS));
+    res = res && SetupDiCallClassInstaller(DIF_PROPERTYCHANGE, device_info_set, &devinfo_data);
+
+    free(inst_id);
+    SetupDiDestroyDeviceInfoList(device_info_set);
+    return res;
 }
 
 void hid_free_device_info(struct hid_device_info *device_info)
@@ -205,10 +214,10 @@ void hid_free_device_info(struct hid_device_info *device_info)
     free(device_info);
 }
 
-struct hid_device *hid_open_device(LPTSTR path, BOOL open_rw)
+struct hid_device *hid_open_device(LPTSTR path, BOOL access_rw, BOOL shared)
 {
-    DWORD desired_access = open_rw ? (GENERIC_WRITE | GENERIC_READ) : 0;
-    DWORD share_mode = FILE_SHARE_READ | FILE_SHARE_WRITE;
+    DWORD desired_access = access_rw ? (GENERIC_WRITE | GENERIC_READ) : 0;
+    DWORD share_mode = shared ? (FILE_SHARE_READ | FILE_SHARE_WRITE) : 0;
     SECURITY_ATTRIBUTES security = {
         .nLength = sizeof(SECURITY_ATTRIBUTES),
         .lpSecurityDescriptor = NULL,
