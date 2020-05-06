@@ -111,7 +111,7 @@ static BOOL add_device(LPTSTR path)
     active_device->device = device;
     int active_device_index = ++last_active_device_index;
     int tray_text_length = _sctprintf(ACTIVE_DEVICE_MENU_TEMPLATE, active_device_index);
-    active_device->tray_text = (LPTSTR)malloc(tray_text_length * sizeof(TCHAR));
+    active_device->tray_text = (LPTSTR)malloc((tray_text_length + 1) * sizeof(TCHAR));
     _stprintf(active_device->tray_text, ACTIVE_DEVICE_MENU_TEMPLATE, active_device_index);
     active_device->tray_menu = (struct tray_menu *)malloc(sizeof(struct tray_menu));
     memset(active_device->tray_menu, 0, sizeof(struct tray_menu));

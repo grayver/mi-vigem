@@ -103,7 +103,7 @@ struct hid_device_info *hid_enumerate(LPTSTR path_filter)
                     }
 
                     struct hid_device_info *dev = (struct hid_device_info *)malloc(sizeof(struct hid_device_info));
-                    dev->path = (LPTSTR)malloc(_tcslen(device_interface_detail_data->DevicePath) * sizeof(TCHAR));
+                    dev->path = (LPTSTR)malloc((_tcslen(device_interface_detail_data->DevicePath) + 1) * sizeof(TCHAR));
                     _tcscpy(dev->path, device_interface_detail_data->DevicePath);
                     dev->description = desc_buffer;
                     dev->next = NULL;
@@ -149,8 +149,8 @@ BOOL hid_reenable_device(LPTSTR path)
     path_w = path;
 #else
     int path_length = strlen(path);
-    path_w = malloc(path_length * sizeof(WCHAR));
-    MultiByteToWideChar(CP_ACP, 0, path, -1, path_w, path_length);
+    path_w = malloc((path_length + 1) * sizeof(WCHAR));
+    MultiByteToWideChar(CP_ACP, 0, path, -1, path_w, path_length + 1);
 #endif /* UNICODE */
 
     DEVPROPTYPE prop_type;
@@ -245,7 +245,7 @@ struct hid_device *hid_open_device(LPTSTR path, BOOL access_rw, BOOL shared)
     }
 
     struct hid_device *dev = (struct hid_device *)malloc(sizeof(struct hid_device));
-    dev->path = (LPTSTR)malloc(_tcslen(path) * sizeof(TCHAR));
+    dev->path = (LPTSTR)malloc((_tcslen(path) + 1) * sizeof(TCHAR));
     _tcscpy(dev->path, path);
     dev->handle = handle;
     dev->read_pending = FALSE;
