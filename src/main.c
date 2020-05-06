@@ -121,6 +121,7 @@ static BOOL add_device(LPTSTR path)
     ReleaseSRWLockExclusive(&active_devices_lock);
 
     rebuild_tray_menu();
+    tray_update(&tray);
     tray_show_notification(NT_TRAY_INFO, TEXT("Add new device"),
                            TEXT("Device added successfully"));
     return TRUE;
@@ -128,6 +129,7 @@ static BOOL add_device(LPTSTR path)
 
 static BOOL remove_device(LPTSTR path)
 {
+    BOOL removed = FALSE;
     AcquireSRWLockExclusive(&active_devices_lock);
     for (int i = 0; i < active_device_count; i++)
     {
@@ -144,11 +146,12 @@ static BOOL remove_device(LPTSTR path)
                         sizeof(struct active_device *) * (active_device_count - i - 1));
             }
             active_device_count--;
-            return TRUE;
+            removed = TRUE;
+            break;
         }
     }
     ReleaseSRWLockExclusive(&active_devices_lock);
-    return FALSE;
+    return removed;
 }
 
 static void refresh_devices()
@@ -220,11 +223,22 @@ static void device_change_cb(UINT op, LPTSTR path)
 
 static void mi_gamepad_update_cb(struct hid_device *device, struct mi_state *state)
 {
-    printf("Up: %d down: %d left: %d right: %d\n",
-           state->buttons & MI_BUTTON_UP > 0 ? 1 : 0,
-           state->buttons & MI_BUTTON_DOWN > 0 ? 1 : 0,
-           state->buttons & MI_BUTTON_LEFT > 0 ? 1 : 0,
-           state->buttons & MI_BUTTON_RIGHT > 0 ? 1 : 0);
+    printf("A: %d B: %d X: %d Y: %d UP: %d DOWN: %d LEFT: %d RIGHT: %d\n",
+           (state->buttons & MI_BUTTON_A) > 0 ? 1 : 0,
+           (state->buttons & MI_BUTTON_B) > 0 ? 1 : 0,
+           (state->buttons & MI_BUTTON_X) > 0 ? 1 : 0,
+           (state->buttons & MI_BUTTON_Y) > 0 ? 1 : 0,
+           (state->buttons & MI_BUTTON_UP) > 0 ? 1 : 0,
+           (state->buttons & MI_BUTTON_DOWN) > 0 ? 1 : 0,
+           (state->buttons & MI_BUTTON_LEFT) > 0 ? 1 : 0,
+           (state->buttons & MI_BUTTON_RIGHT) > 0 ? 1 : 0);
+    printf("L1: %d L2: %d R1: %d R2: %d LS: %d RS: %d\n",
+           (state->buttons & MI_BUTTON_L1) > 0 ? 1 : 0,
+           state->l2_trigger,
+           (state->buttons & MI_BUTTON_R1) > 0 ? 1 : 0,
+           state->r2_trigger,
+           (state->buttons & MI_BUTTON_LS) > 0 ? 1 : 0,
+           (state->buttons & MI_BUTTON_RS) > 0 ? 1 : 0);
     fflush(stdout);
 }
 
@@ -250,8 +264,12 @@ static void mi_gamepad_stop_cb(struct hid_device *device, BYTE break_reason)
         ntf_text = TEXT("Unknown error");
         break;
     }
-    tray_show_notification(ntf_type, TEXT("Remove device"), ntf_text);
-    remove_device(device->path);
+    if (remove_device(device->path))
+    {
+        rebuild_tray_menu();
+        tray_update(&tray);
+        tray_show_notification(ntf_type, TEXT("Remove device"), ntf_text);
+    }
 }
 
 static void refresh_cb(struct tray_menu *item)
