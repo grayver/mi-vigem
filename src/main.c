@@ -4,9 +4,15 @@
 #include <windows.h>
 #include <synchapi.h>
 
+#include <ViGEm/Client.h>
+
 #include "tray.h"
 #include "hid.h"
 #include "mi.h"
+
+#ifndef _DEBUG
+#pragma comment(linker, "/SUBSYSTEM:windows /ENTRY:mainCRTStartup")
+#endif
 
 #define MAX_ACTIVE_DEVICE_COUNT 4
 #define ACTIVE_DEVICE_MENU_TEMPLATE TEXT("#%d Xiaomi Gamepad (batt. %s)")

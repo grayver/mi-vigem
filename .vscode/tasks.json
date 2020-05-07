@@ -21,8 +21,10 @@
       "args": [
         "/Zi",
         "/EHsc",
+        "/Iinclude",
         "/Foobj/",
         "/Febin/mi-vigem.exe",
+        "lib/ViGEmClient/*.cpp",
         "obj/mi-vigem.res",
         "src/*.c"
       ],
