@@ -20,10 +20,12 @@
 
 struct active_device
 {
-    struct hid_device *device;
     int index;
-    int gamepad_id;
-    int battery_level;
+    struct hid_device *src_device;
+    int src_gamepad_id;
+    int src_battery_level;
+    PVIGEM_TARGET tgt_device;
+    XUSB_REPORT tgt_report;
     LPTSTR tray_text;
     struct tray_menu *tray_menu;
 };
@@ -32,10 +34,14 @@ static int last_active_device_index = 0;
 static int active_device_count = 0;
 static struct active_device *active_devices[MAX_ACTIVE_DEVICE_COUNT];
 static SRWLOCK active_devices_lock = SRWLOCK_INIT;
+static PVIGEM_CLIENT vigem_client;
+static BOOL vigem_connected = FALSE;
 
 // future declarations
 static void mi_gamepad_update_cb(int gamepad_id, struct mi_state *state);
 static void mi_gamepad_stop_cb(int gamepad_id, BYTE break_reason);
+static void CALLBACK x360_notification_cb(PVIGEM_CLIENT client, PVIGEM_TARGET target, UCHAR large_motor,
+                                          UCHAR small_motor, UCHAR led_number);
 static void refresh_cb(struct tray_menu *item);
 static void quit_cb(struct tray_menu *item);
 
@@ -108,8 +114,8 @@ static BOOL add_device(LPTSTR path)
         return FALSE;
     }
 
-    int gamepad_id = mi_gamepad_start(device, mi_gamepad_update_cb, mi_gamepad_stop_cb);
-    if (gamepad_id < 0)
+    int mi_gamepad_id = mi_gamepad_start(device, mi_gamepad_update_cb, mi_gamepad_stop_cb);
+    if (mi_gamepad_id < 0)
     {
         tray_show_notification(NT_TRAY_WARNING, TEXT("Add new device"),
                                TEXT("Error initializing new device"));
@@ -119,37 +125,59 @@ static BOOL add_device(LPTSTR path)
     }
 
     struct active_device* active_device = (struct active_device *)malloc(sizeof(struct active_device));
-    active_device->device = device;
+    active_device->src_device = device;
     active_device->index = ++last_active_device_index;
-    active_device->gamepad_id = gamepad_id;
-    active_device->battery_level = -1;
+    active_device->src_gamepad_id = mi_gamepad_id;
+    active_device->src_battery_level = -1;
+    if (vigem_connected)
+    {
+        active_device->tgt_device = vigem_target_x360_alloc();
+        vigem_target_add(vigem_client, active_device->tgt_device);
+        XUSB_REPORT_INIT(&active_device->tgt_report);
+        vigem_target_x360_register_notification(vigem_client, active_device->tgt_device, x360_notification_cb);
+    }
     int tray_text_length = _sctprintf(ACTIVE_DEVICE_MENU_TEMPLATE, active_device->index, BATTERY_NA_TEXT);
     active_device->tray_text = (LPTSTR)malloc((tray_text_length + 1) * sizeof(TCHAR));
     _stprintf(active_device->tray_text, ACTIVE_DEVICE_MENU_TEMPLATE, active_device->index, BATTERY_NA_TEXT);
     active_device->tray_menu = (struct tray_menu *)malloc(sizeof(struct tray_menu));
     memset(active_device->tray_menu, 0, sizeof(struct tray_menu));
     active_device->tray_menu->text = active_device->tray_text;
+
     AcquireSRWLockExclusive(&active_devices_lock);
     active_devices[active_device_count++] = active_device;
     ReleaseSRWLockExclusive(&active_devices_lock);
 
     rebuild_tray_menu();
     tray_update(&tray);
-    tray_show_notification(NT_TRAY_INFO, TEXT("Add new device"),
-                           TEXT("Device added successfully"));
+    if (vigem_connected)
+    {
+        tray_show_notification(NT_TRAY_INFO, TEXT("Add new device"),
+                               TEXT("Device added successfully"));
+    }
+    else
+    {
+        tray_show_notification(NT_TRAY_WARNING, TEXT("Add new device"),
+                               TEXT("Device added, but emulation doesn't work due to ViGEmBus problem"));
+    }
     return TRUE;
 }
 
-static BOOL remove_device(int gamepad_id)
+static BOOL remove_device(int mi_gamepad_id)
 {
     BOOL removed = FALSE;
     AcquireSRWLockExclusive(&active_devices_lock);
     for (int i = 0; i < active_device_count; i++)
     {
-        if (active_devices[i]->gamepad_id == gamepad_id)
+        if (active_devices[i]->src_gamepad_id == mi_gamepad_id)
         {
-            hid_close_device(active_devices[i]->device);
-            hid_free_device(active_devices[i]->device);
+            hid_close_device(active_devices[i]->src_device);
+            hid_free_device(active_devices[i]->src_device);
+            if (vigem_connected)
+            {
+                vigem_target_x360_unregister_notification(active_devices[i]->tgt_device);
+                vigem_target_remove(vigem_client, active_devices[i]->tgt_device);
+                vigem_target_free(active_devices[i]->tgt_device);
+            }
             free(active_devices[i]->tray_menu);
             free(active_devices[i]->tray_text);
             free(active_devices[i]);
@@ -181,7 +209,7 @@ static void refresh_devices()
         cur = device_info;
         while (cur != NULL)
         {
-            if (_tcscmp(active_devices[i]->device->path, cur->path) == 0)
+            if (_tcscmp(active_devices[i]->src_device->path, cur->path) == 0)
             {
                 found = TRUE;
                 break;
@@ -190,7 +218,7 @@ static void refresh_devices()
         }
         if (!found)
         {
-            mi_gamepad_stop(active_devices[i]->gamepad_id);
+            mi_gamepad_stop(active_devices[i]->src_gamepad_id);
         }
     }
     ReleaseSRWLockShared(&active_devices_lock);
@@ -203,7 +231,7 @@ static void refresh_devices()
         AcquireSRWLockShared(&active_devices_lock);
         for (int i = 0; i < active_device_count; i++)
         {
-            if (_tcscmp(cur->path, active_devices[i]->device->path) == 0)
+            if (_tcscmp(cur->path, active_devices[i]->src_device->path) == 0)
             {
                 found = TRUE;
                 break;
@@ -239,13 +267,13 @@ static void mi_gamepad_update_cb(int gamepad_id, struct mi_state *state)
     AcquireSRWLockShared(&active_devices_lock);
     for (int i = 0; i < active_device_count; i++)
     {
-        if (active_devices[i]->gamepad_id == gamepad_id)
+        if (active_devices[i]->src_gamepad_id == gamepad_id)
         {
-            if (active_devices[i]->battery_level != state->battery)
+            if (active_devices[i]->src_battery_level != state->battery)
             {
-                active_devices[i]->battery_level = state->battery;
+                active_devices[i]->src_battery_level = state->battery;
                 TCHAR battery_buffer[5];
-                _stprintf(battery_buffer, TEXT("%d%%"), active_devices[i]->battery_level);
+                _stprintf(battery_buffer, TEXT("%d%%"), active_devices[i]->src_battery_level);
                 int tray_text_length = _sctprintf(ACTIVE_DEVICE_MENU_TEMPLATE, active_devices[i]->index, battery_buffer);
                 free(active_devices[i]->tray_text);
                 active_devices[i]->tray_text = (LPTSTR)malloc((tray_text_length + 1) * sizeof(TCHAR));
@@ -259,23 +287,7 @@ static void mi_gamepad_update_cb(int gamepad_id, struct mi_state *state)
     }
     ReleaseSRWLockShared(&active_devices_lock);
 
-    printf("A: %d B: %d X: %d Y: %d UP: %d DOWN: %d LEFT: %d RIGHT: %d\n",
-           (state->buttons & MI_BUTTON_A) > 0 ? 1 : 0,
-           (state->buttons & MI_BUTTON_B) > 0 ? 1 : 0,
-           (state->buttons & MI_BUTTON_X) > 0 ? 1 : 0,
-           (state->buttons & MI_BUTTON_Y) > 0 ? 1 : 0,
-           (state->buttons & MI_BUTTON_UP) > 0 ? 1 : 0,
-           (state->buttons & MI_BUTTON_DOWN) > 0 ? 1 : 0,
-           (state->buttons & MI_BUTTON_LEFT) > 0 ? 1 : 0,
-           (state->buttons & MI_BUTTON_RIGHT) > 0 ? 1 : 0);
-    printf("L1: %d L2: %d R1: %d R2: %d LS: %d RS: %d\n",
-           (state->buttons & MI_BUTTON_L1) > 0 ? 1 : 0,
-           state->l2_trigger,
-           (state->buttons & MI_BUTTON_R1) > 0 ? 1 : 0,
-           state->r2_trigger,
-           (state->buttons & MI_BUTTON_LS) > 0 ? 1 : 0,
-           (state->buttons & MI_BUTTON_RS) > 0 ? 1 : 0);
-    fflush(stdout);
+    // send target report
 }
 
 static void mi_gamepad_stop_cb(int gamepad_id, BYTE break_reason)
@@ -308,6 +320,26 @@ static void mi_gamepad_stop_cb(int gamepad_id, BYTE break_reason)
     }
 }
 
+static void CALLBACK x360_notification_cb(PVIGEM_CLIENT client, PVIGEM_TARGET target, UCHAR large_motor,
+                                          UCHAR small_motor, UCHAR led_number)
+{
+    int mi_gamepad_id = -1;
+    AcquireSRWLockShared(&active_devices_lock);
+    for (int i = 0; i < active_device_count; i++)
+    {
+        if (active_devices[i]->tgt_device == target)
+        {
+            mi_gamepad_id = active_devices[i]->src_gamepad_id;
+            break;
+        }
+    }
+    ReleaseSRWLockShared(&active_devices_lock);
+    if (mi_gamepad_id >= 0)
+    {
+        mi_gamepad_set_vibration(mi_gamepad_id, small_motor, large_motor);
+    }
+}
+
 static void refresh_cb(struct tray_menu *item)
 {
     (void)item;
@@ -332,6 +364,27 @@ int main()
         printf("Failed to create tray\n");
         return 1;
     }
+    vigem_client = vigem_alloc();
+    VIGEM_ERROR vigem_res = vigem_connect(vigem_client);
+    if (vigem_res == VIGEM_ERROR_BUS_NOT_FOUND)
+    {
+        tray_show_notification(NT_TRAY_ERROR, TEXT("ViGEmBus connection"),
+                               TEXT("ViGEmBus not installed"));
+    }
+    else if (vigem_res == VIGEM_ERROR_BUS_VERSION_MISMATCH)
+    {
+        tray_show_notification(NT_TRAY_ERROR, TEXT("ViGEmBus connection"),
+                               TEXT("ViGEmBus incompatible version"));
+    }
+    else if (vigem_res != VIGEM_ERROR_NONE)
+    {
+        tray_show_notification(NT_TRAY_ERROR, TEXT("ViGEmBus connection"),
+                               TEXT("Error connecting to ViGEmBus"));
+    }
+    else
+    {
+        vigem_connected = TRUE;
+    }
     refresh_devices();
     tray_register_device_notification(hid_get_class(), device_change_cb);
 
@@ -343,14 +396,25 @@ int main()
     AcquireSRWLockExclusive(&active_devices_lock);
     for (int i = 0; i < active_device_count; i++)
     {
-        hid_close_device(active_devices[i]->device);
-        hid_free_device(active_devices[i]->device);
+        hid_close_device(active_devices[i]->src_device);
+        hid_free_device(active_devices[i]->src_device);
+        if (vigem_connected)
+        {
+            vigem_target_x360_unregister_notification(active_devices[i]->tgt_device);
+            vigem_target_remove(vigem_client, active_devices[i]->tgt_device);
+            vigem_target_free(active_devices[i]->tgt_device);
+        }
         free(active_devices[i]->tray_menu);
         free(active_devices[i]->tray_text);
         free(active_devices[i]);
     }
     active_device_count = 0;
     ReleaseSRWLockExclusive(&active_devices_lock);
+    if (vigem_connected)
+    {
+        vigem_disconnect(vigem_client);
+    }
+    vigem_free(vigem_client);
     free(tray.menu);
     return 0;
 }
