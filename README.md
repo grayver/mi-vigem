@@ -5,7 +5,12 @@ XBox360 emulation driver is provided by ViGEm (https://github.com/ViGEm/ViGEmBus
 
 ## Requirements
 - Windows 7 or newer
+- Microsoft Visual C++ 2019 redistributable (can be downloaded [here](https://support.microsoft.com/en-us/help/2977003/the-latest-supported-visual-c-downloads))
 - ViGEm bus installed (can be downloaded [here](https://github.com/ViGEm/ViGEmBus/releases))
+
+## How it works
+Mi-ViGEm program at start scans for Xiaomi Gamepad devices and then proxies found Xiaomi gamepads to virtual XBox360 gamepads (with help of ViGEmBus). Also Mi-ViGEm subscribes to system device plug/unplug notifications and rescan devices on each notification.
+All found devices are displayed in tray icon context menu (along with their battery level). Manual device rescan can be initiated via tray icon context menu.
 
 ## Thanks to
 
