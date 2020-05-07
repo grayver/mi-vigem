@@ -22,6 +22,7 @@ struct active_device
 {
     struct hid_device *device;
     int index;
+    int gamepad_id;
     int battery_level;
     LPTSTR tray_text;
     struct tray_menu *tray_menu;
@@ -33,8 +34,8 @@ static struct active_device *active_devices[MAX_ACTIVE_DEVICE_COUNT];
 static SRWLOCK active_devices_lock = SRWLOCK_INIT;
 
 // future declarations
-static void mi_gamepad_update_cb(struct hid_device *device, struct mi_state *state);
-static void mi_gamepad_stop_cb(struct hid_device *device, BYTE break_reason);
+static void mi_gamepad_update_cb(int gamepad_id, struct mi_state *state);
+static void mi_gamepad_stop_cb(int gamepad_id, BYTE break_reason);
 static void refresh_cb(struct tray_menu *item);
 static void quit_cb(struct tray_menu *item);
 
@@ -107,7 +108,8 @@ static BOOL add_device(LPTSTR path)
         return FALSE;
     }
 
-    if (!mi_gamepad_start(device, mi_gamepad_update_cb, mi_gamepad_stop_cb))
+    int gamepad_id = mi_gamepad_start(device, mi_gamepad_update_cb, mi_gamepad_stop_cb);
+    if (gamepad_id < 0)
     {
         tray_show_notification(NT_TRAY_WARNING, TEXT("Add new device"),
                                TEXT("Error initializing new device"));
@@ -119,6 +121,7 @@ static BOOL add_device(LPTSTR path)
     struct active_device* active_device = (struct active_device *)malloc(sizeof(struct active_device));
     active_device->device = device;
     active_device->index = ++last_active_device_index;
+    active_device->gamepad_id = gamepad_id;
     active_device->battery_level = -1;
     int tray_text_length = _sctprintf(ACTIVE_DEVICE_MENU_TEMPLATE, active_device->index, BATTERY_NA_TEXT);
     active_device->tray_text = (LPTSTR)malloc((tray_text_length + 1) * sizeof(TCHAR));
@@ -137,13 +140,13 @@ static BOOL add_device(LPTSTR path)
     return TRUE;
 }
 
-static BOOL remove_device(LPTSTR path)
+static BOOL remove_device(int gamepad_id)
 {
     BOOL removed = FALSE;
     AcquireSRWLockExclusive(&active_devices_lock);
     for (int i = 0; i < active_device_count; i++)
     {
-        if (_tcscmp(path, active_devices[i]->device->path) == 0)
+        if (active_devices[i]->gamepad_id == gamepad_id)
         {
             hid_close_device(active_devices[i]->device);
             hid_free_device(active_devices[i]->device);
@@ -187,7 +190,7 @@ static void refresh_devices()
         }
         if (!found)
         {
-            mi_gamepad_stop(active_devices[i]->device);
+            mi_gamepad_stop(active_devices[i]->gamepad_id);
         }
     }
     ReleaseSRWLockShared(&active_devices_lock);
@@ -231,12 +234,12 @@ static void device_change_cb(UINT op, LPTSTR path)
     refresh_devices();
 }
 
-static void mi_gamepad_update_cb(struct hid_device *device, struct mi_state *state)
+static void mi_gamepad_update_cb(int gamepad_id, struct mi_state *state)
 {
     AcquireSRWLockShared(&active_devices_lock);
     for (int i = 0; i < active_device_count; i++)
     {
-        if (_tcscmp(device->path, active_devices[i]->device->path) == 0)
+        if (active_devices[i]->gamepad_id == gamepad_id)
         {
             if (active_devices[i]->battery_level != state->battery)
             {
@@ -275,7 +278,7 @@ static void mi_gamepad_update_cb(struct hid_device *device, struct mi_state *sta
     fflush(stdout);
 }
 
-static void mi_gamepad_stop_cb(struct hid_device *device, BYTE break_reason)
+static void mi_gamepad_stop_cb(int gamepad_id, BYTE break_reason)
 {
     UINT ntf_type = break_reason == MI_BREAK_REASON_REQUESTED ? NT_TRAY_INFO : NT_TRAY_WARNING;
     LPTSTR ntf_text;
@@ -297,7 +300,7 @@ static void mi_gamepad_stop_cb(struct hid_device *device, BYTE break_reason)
         ntf_text = TEXT("Unknown error");
         break;
     }
-    if (remove_device(device->path))
+    if (remove_device(gamepad_id))
     {
         rebuild_tray_menu();
         tray_update(&tray);

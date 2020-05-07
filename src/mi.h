@@ -47,9 +47,8 @@ struct mi_state
     BYTE battery;
 };
 
-BOOL mi_gamepad_start(struct hid_device *device, void (*upd_cb)(struct hid_device *, struct mi_state *),
-                      void (*stop_cb)(struct hid_device *, BYTE));
-void mi_gamepad_set_vibration(struct hid_device *device, BYTE small_motor, BYTE big_motor);
-void mi_gamepad_stop(struct hid_device *device);
+int mi_gamepad_start(struct hid_device *device, void (*upd_cb)(int, struct mi_state *), void (*stop_cb)(int, BYTE));
+void mi_gamepad_set_vibration(int gamepad_id, BYTE small_motor, BYTE big_motor);
+void mi_gamepad_stop(int gamepad_id);
 
 #endif /* MI_H */

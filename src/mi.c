@@ -33,10 +33,11 @@ struct mi_gamepad;
 
 struct mi_gamepad
 {
+    int id;
     struct hid_device *device;
     struct mi_state state;
-    void (*upd_cb)(struct hid_device *, struct mi_state *);
-    void (*stop_cb)(struct hid_device *, BYTE);
+    void (*upd_cb)(int, struct mi_state *);
+    void (*stop_cb)(int, BYTE);
 
     BOOL active;
 
@@ -51,6 +52,7 @@ struct mi_gamepad
     struct mi_gamepad *next;
 };
 
+static int last_gamepad_id = 0;
 static struct mi_gamepad *root_gp = NULL;
 static SRWLOCK gp_lock = SRWLOCK_INIT;
 
@@ -117,7 +119,7 @@ static DWORD WINAPI _mi_input_thread_proc(LPVOID lparam)
 
         gp->state.buttons |= gp->device->input_buffer[20] > 0 ? MI_BUTTON_MI_BTN : 0;
 
-        gp->upd_cb(gp->device, &gp->state);
+        gp->upd_cb(gp->id, &gp->state);
     }
 
     gp->active = FALSE;
@@ -140,7 +142,7 @@ static DWORD WINAPI _mi_input_thread_proc(LPVOID lparam)
 
     CloseHandle(gp->in_thread);
     CloseHandle(gp->out_thread);
-    gp->stop_cb(gp->device, break_reason);
+    gp->stop_cb(gp->id, break_reason);
     free(gp);
 
     return 0;
@@ -174,15 +176,15 @@ static DWORD WINAPI _mi_output_thread_proc(LPVOID lparam)
     return 0;
 }
 
-BOOL mi_gamepad_start(struct hid_device *device, void (*upd_cb)(struct hid_device *, struct mi_state *),
-                      void (*stop_cb)(struct hid_device *, BYTE))
+int mi_gamepad_start(struct hid_device *device, void (*upd_cb)(int, struct mi_state *), void (*stop_cb)(int, BYTE))
 {
     if (hid_send_feature_report(device, init_vibration, sizeof(init_vibration)) <= 0)
     {
-        return FALSE;
+        return -1;
     }
 
     struct mi_gamepad *gp = (struct mi_gamepad *)malloc(sizeof(struct mi_gamepad));
+    gp->id = ++last_gamepad_id;
     gp->device = device;
     gp->upd_cb = upd_cb;
     gp->stop_cb = stop_cb;
@@ -209,7 +211,7 @@ BOOL mi_gamepad_start(struct hid_device *device, void (*upd_cb)(struct hid_devic
             CloseHandle(gp->out_thread);
         }
         free(gp);
-        return FALSE;
+        return -1;
     }
 
     AcquireSRWLockExclusive(&gp_lock);
@@ -232,16 +234,16 @@ BOOL mi_gamepad_start(struct hid_device *device, void (*upd_cb)(struct hid_devic
 
     ResumeThread(gp->in_thread);
     ResumeThread(gp->out_thread);
-    return TRUE;
+    return gp->id;
 }
 
-void mi_gamepad_set_vibration(struct hid_device *device, BYTE small_motor, BYTE big_motor)
+void mi_gamepad_set_vibration(int gamepad_id, BYTE small_motor, BYTE big_motor)
 {
     AcquireSRWLockShared(&gp_lock);
     struct mi_gamepad *cur_gp = root_gp;
     while (cur_gp != NULL)
     {
-        if (_tcscmp(device->path, cur_gp->device->path) == 0)
+        if (cur_gp->id == gamepad_id)
         {
             break;
         }
@@ -257,13 +259,13 @@ void mi_gamepad_set_vibration(struct hid_device *device, BYTE small_motor, BYTE 
     }
 }
 
-void mi_gamepad_stop(struct hid_device *device)
+void mi_gamepad_stop(int gamepad_id)
 {
     AcquireSRWLockShared(&gp_lock);
     struct mi_gamepad *cur_gp = root_gp;
     while (cur_gp != NULL)
     {
-        if (_tcscmp(device->path, cur_gp->device->path) == 0)
+        if (cur_gp->id == gamepad_id)
         {
             cur_gp->active = FALSE;
             break;
