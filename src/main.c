@@ -56,6 +56,20 @@ static struct tray tray =
     .menu = NULL
 };
 
+SHORT FORCEINLINE _map_byte_to_short(BYTE value, BOOL inverted)
+{
+    CHAR centered = value - 128;
+    if (centered < -127)
+    {
+        centered = -127;
+    }
+    if (inverted)
+    {
+        centered = -centered;
+    }
+    return (SHORT)(32767 * centered / 127);
+}
+
 static void rebuild_tray_menu()
 {
     struct tray_menu *prev_menu = tray.menu;
@@ -264,30 +278,58 @@ static void device_change_cb(UINT op, LPTSTR path)
 
 static void mi_gamepad_update_cb(int gamepad_id, struct mi_state *state)
 {
+    struct active_device* active_device = NULL;
     AcquireSRWLockShared(&active_devices_lock);
     for (int i = 0; i < active_device_count; i++)
     {
         if (active_devices[i]->src_gamepad_id == gamepad_id)
         {
-            if (active_devices[i]->src_battery_level != state->battery)
-            {
-                active_devices[i]->src_battery_level = state->battery;
-                TCHAR battery_buffer[5];
-                _stprintf(battery_buffer, TEXT("%d%%"), active_devices[i]->src_battery_level);
-                int tray_text_length = _sctprintf(ACTIVE_DEVICE_MENU_TEMPLATE, active_devices[i]->index, battery_buffer);
-                free(active_devices[i]->tray_text);
-                active_devices[i]->tray_text = (LPTSTR)malloc((tray_text_length + 1) * sizeof(TCHAR));
-                _stprintf(active_devices[i]->tray_text, ACTIVE_DEVICE_MENU_TEMPLATE, active_devices[i]->index, battery_buffer);
-                active_devices[i]->tray_menu->text = active_devices[i]->tray_text;
-                rebuild_tray_menu();
-                tray_update(&tray);
-            }
+            active_device = active_devices[i];
             break;
         }
     }
     ReleaseSRWLockShared(&active_devices_lock);
 
-    // send target report
+    if (active_device->src_battery_level != state->battery)
+    {
+        active_device->src_battery_level = state->battery;
+        TCHAR battery_buffer[5];
+        _stprintf(battery_buffer, TEXT("%d%%"), active_device->src_battery_level);
+        int tray_text_length = _sctprintf(ACTIVE_DEVICE_MENU_TEMPLATE, active_device->index, battery_buffer);
+        free(active_device->tray_text);
+        active_device->tray_text = (LPTSTR)malloc((tray_text_length + 1) * sizeof(TCHAR));
+        _stprintf(active_device->tray_text, ACTIVE_DEVICE_MENU_TEMPLATE, active_device->index, battery_buffer);
+        active_device->tray_menu->text = active_device->tray_text;
+        rebuild_tray_menu();
+        tray_update(&tray);
+    }
+
+    if (vigem_connected)
+    {
+        active_device->tgt_report.wButtons = 0;
+        active_device->tgt_report.wButtons |= (state->buttons & MI_BUTTON_UP) != 0 ? XUSB_GAMEPAD_DPAD_UP : 0;
+        active_device->tgt_report.wButtons |= (state->buttons & MI_BUTTON_DOWN) != 0 ? XUSB_GAMEPAD_DPAD_DOWN : 0;
+        active_device->tgt_report.wButtons |= (state->buttons & MI_BUTTON_LEFT) != 0 ? XUSB_GAMEPAD_DPAD_LEFT : 0;
+        active_device->tgt_report.wButtons |= (state->buttons & MI_BUTTON_RIGHT) != 0 ? XUSB_GAMEPAD_DPAD_RIGHT : 0;
+        active_device->tgt_report.wButtons |= (state->buttons & MI_BUTTON_MENU) != 0 ? XUSB_GAMEPAD_START : 0;
+        active_device->tgt_report.wButtons |= (state->buttons & MI_BUTTON_RETURN) != 0 ? XUSB_GAMEPAD_BACK : 0;
+        active_device->tgt_report.wButtons |= (state->buttons & MI_BUTTON_LS) != 0 ? XUSB_GAMEPAD_LEFT_THUMB : 0;
+        active_device->tgt_report.wButtons |= (state->buttons & MI_BUTTON_RS) != 0 ? XUSB_GAMEPAD_RIGHT_THUMB : 0;
+        active_device->tgt_report.wButtons |= (state->buttons & MI_BUTTON_L1) != 0 ? XUSB_GAMEPAD_LEFT_SHOULDER : 0;
+        active_device->tgt_report.wButtons |= (state->buttons & MI_BUTTON_R1) != 0 ? XUSB_GAMEPAD_RIGHT_SHOULDER : 0;
+        active_device->tgt_report.wButtons |= (state->buttons & MI_BUTTON_A) != 0 ? XUSB_GAMEPAD_A : 0;
+        active_device->tgt_report.wButtons |= (state->buttons & MI_BUTTON_B) != 0 ? XUSB_GAMEPAD_B : 0;
+        active_device->tgt_report.wButtons |= (state->buttons & MI_BUTTON_X) != 0 ? XUSB_GAMEPAD_X : 0;
+        active_device->tgt_report.wButtons |= (state->buttons & MI_BUTTON_Y) != 0 ? XUSB_GAMEPAD_Y : 0;
+        active_device->tgt_report.wButtons |= (state->buttons & MI_BUTTON_MI_BTN) != 0 ? XUSB_GAMEPAD_GUIDE : 0;
+        active_device->tgt_report.bLeftTrigger = state->l2_trigger;
+        active_device->tgt_report.bRightTrigger = state->r2_trigger;
+        active_device->tgt_report.sThumbLX = _map_byte_to_short(state->left_stick_x, FALSE);
+        active_device->tgt_report.sThumbLY = _map_byte_to_short(state->left_stick_y, TRUE);
+        active_device->tgt_report.sThumbRX = _map_byte_to_short(state->right_stick_x, FALSE);
+        active_device->tgt_report.sThumbRY = _map_byte_to_short(state->right_stick_y, TRUE);
+        vigem_target_x360_update(vigem_client, active_device->tgt_device, active_device->tgt_report);
+    }
 }
 
 static void mi_gamepad_stop_cb(int gamepad_id, BYTE break_reason)
