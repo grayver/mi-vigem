@@ -250,7 +250,7 @@ int mi_gamepad_start(struct hid_device *device, void (*upd_cb)(int, struct mi_st
     gp->in_thread = CreateThread(&security, 0, _mi_input_thread_proc, gp, CREATE_SUSPENDED, NULL);
     gp->out_thread = CreateThread(&security, 0, _mi_output_thread_proc, gp, CREATE_SUSPENDED, NULL);
     gp->delay_thread = CreateThread(&security, 0, _mi_delay_thread_proc, gp, CREATE_SUSPENDED, NULL);
-    if (gp->in_thread == NULL || gp->out_thread == NULL || gp->delay_thread)
+    if (gp->in_thread == NULL || gp->out_thread == NULL || gp->delay_thread == NULL)
     {
         if (gp->in_thread != NULL)
         {
