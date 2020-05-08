@@ -35,14 +35,18 @@ struct mi_gamepad
 {
     int id;
     struct hid_device *device;
+    SRWLOCK state_lock;
     struct mi_state state;
+    BOOL hold_mi_btn;
     void (*upd_cb)(int, struct mi_state *);
     void (*stop_cb)(int, BYTE);
 
     BOOL active;
+    HANDLE stopping_event;
 
     HANDLE in_thread;
     HANDLE out_thread;
+    HANDLE delay_thread;
 
     SRWLOCK vibr_lock;
     BYTE small_motor;
@@ -87,6 +91,8 @@ static DWORD WINAPI _mi_input_thread_proc(LPVOID lparam)
             continue;
         }
 
+        AcquireSRWLockExclusive(&gp->state_lock);
+
         gp->state.buttons = MI_BUTTON_NONE;
 
         gp->state.buttons |= (gp->device->input_buffer[1] & (1 << 0)) != 0 ? MI_BUTTON_A : 0;
@@ -117,13 +123,21 @@ static DWORD WINAPI _mi_input_thread_proc(LPVOID lparam)
 
         gp->state.battery = gp->device->input_buffer[19];
 
-        gp->state.buttons |= gp->device->input_buffer[20] > 0 ? MI_BUTTON_MI_BTN : 0;
+        if (!gp->hold_mi_btn && gp->device->input_buffer[20] > 0)
+        {
+            gp->hold_mi_btn = TRUE;
+        }
+        gp->state.buttons |= gp->hold_mi_btn ? MI_BUTTON_MI_BTN : 0;
+
+        ReleaseSRWLockExclusive(&gp->state_lock);
 
         gp->upd_cb(gp->id, &gp->state);
     }
 
     gp->active = FALSE;
-    WaitForSingleObject(gp->out_thread, INFINITE);
+    SetEvent(gp->stopping_event);
+    HANDLE wait_threads[2] = { gp->out_thread, gp->delay_thread };
+    WaitForMultipleObjects(2, wait_threads, TRUE, INFINITE);
 
     AcquireSRWLockExclusive(&gp_lock);
     if (gp->prev == NULL)
@@ -142,6 +156,7 @@ static DWORD WINAPI _mi_input_thread_proc(LPVOID lparam)
 
     CloseHandle(gp->in_thread);
     CloseHandle(gp->out_thread);
+    CloseHandle(gp->delay_thread);
     gp->stop_cb(gp->id, break_reason);
     free(gp);
 
@@ -176,6 +191,36 @@ static DWORD WINAPI _mi_output_thread_proc(LPVOID lparam)
     return 0;
 }
 
+static DWORD WINAPI _mi_delay_thread_proc(LPVOID lparam)
+{
+    struct mi_gamepad *gp = (struct mi_gamepad *)lparam;
+
+    HANDLE timer = CreateWaitableTimer(NULL, TRUE, NULL);
+    HANDLE wait_objects[2] = { gp->stopping_event, timer };
+    LARGE_INTEGER due_time;
+    due_time.QuadPart = -2000000LL;
+
+    while (gp->active)
+    {
+        if (gp->hold_mi_btn)
+        {
+            SetWaitableTimer(timer, &due_time, 0, NULL, NULL, FALSE);
+            WaitForMultipleObjects(2, wait_objects, FALSE, INFINITE);
+
+            AcquireSRWLockExclusive(&gp->state_lock);
+            gp->hold_mi_btn = FALSE;
+            gp->state.buttons ^= MI_BUTTON_MI_BTN;
+            ReleaseSRWLockExclusive(&gp->state_lock);
+
+            gp->upd_cb(gp->id, &gp->state);
+        }
+    }
+
+    CloseHandle(timer);
+
+    return 0;
+}
+
 int mi_gamepad_start(struct hid_device *device, void (*upd_cb)(int, struct mi_state *), void (*stop_cb)(int, BYTE))
 {
     if (hid_send_feature_report(device, init_vibration, sizeof(init_vibration)) <= 0)
@@ -183,24 +228,29 @@ int mi_gamepad_start(struct hid_device *device, void (*upd_cb)(int, struct mi_st
         return -1;
     }
 
+    SECURITY_ATTRIBUTES security = {
+        .nLength = sizeof(SECURITY_ATTRIBUTES),
+        .lpSecurityDescriptor = NULL,
+        .bInheritHandle = TRUE};
+
     struct mi_gamepad *gp = (struct mi_gamepad *)malloc(sizeof(struct mi_gamepad));
     gp->id = ++last_gamepad_id;
     gp->device = device;
+    InitializeSRWLock(&gp->state_lock);
+    gp->hold_mi_btn = FALSE;
     gp->upd_cb = upd_cb;
     gp->stop_cb = stop_cb;
     gp->active = TRUE;
+    gp->stopping_event = CreateEvent(&security, TRUE, FALSE, NULL);
     InitializeSRWLock(&gp->vibr_lock);
     gp->small_motor = init_vibration[MI_VIBRATION_SMALL_MOTOR];
     gp->big_motor = init_vibration[MI_VIBRATION_BIG_MOTOR];
     gp->next = NULL;
 
-    SECURITY_ATTRIBUTES security = {
-        .nLength = sizeof(SECURITY_ATTRIBUTES),
-        .lpSecurityDescriptor = NULL,
-        .bInheritHandle = TRUE};
     gp->in_thread = CreateThread(&security, 0, _mi_input_thread_proc, gp, CREATE_SUSPENDED, NULL);
     gp->out_thread = CreateThread(&security, 0, _mi_output_thread_proc, gp, CREATE_SUSPENDED, NULL);
-    if (gp->in_thread == NULL || gp->out_thread == NULL)
+    gp->delay_thread = CreateThread(&security, 0, _mi_delay_thread_proc, gp, CREATE_SUSPENDED, NULL);
+    if (gp->in_thread == NULL || gp->out_thread == NULL || gp->delay_thread)
     {
         if (gp->in_thread != NULL)
         {
@@ -209,6 +259,10 @@ int mi_gamepad_start(struct hid_device *device, void (*upd_cb)(int, struct mi_st
         if (gp->out_thread != NULL)
         {
             CloseHandle(gp->out_thread);
+        }
+        if (gp->delay_thread != NULL)
+        {
+            CloseHandle(gp->delay_thread);
         }
         free(gp);
         return -1;
@@ -234,6 +288,7 @@ int mi_gamepad_start(struct hid_device *device, void (*upd_cb)(int, struct mi_st
 
     ResumeThread(gp->in_thread);
     ResumeThread(gp->out_thread);
+    ResumeThread(gp->delay_thread);
     return gp->id;
 }
 
