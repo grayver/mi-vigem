@@ -46,7 +46,9 @@ struct mi_gamepad
 
     HANDLE in_thread;
     HANDLE out_thread;
+    HANDLE out_event;
     HANDLE delay_thread;
+    HANDLE delay_event;
 
     SRWLOCK vibr_lock;
     BYTE small_motor;
@@ -126,6 +128,7 @@ static DWORD WINAPI _mi_input_thread_proc(LPVOID lparam)
         if (!gp->hold_mi_btn && gp->device->input_buffer[20] > 0)
         {
             gp->hold_mi_btn = TRUE;
+            SetEvent(gp->delay_event);
         }
         gp->state.buttons |= gp->hold_mi_btn ? MI_BUTTON_MI_BTN : 0;
 
@@ -154,6 +157,9 @@ static DWORD WINAPI _mi_input_thread_proc(LPVOID lparam)
     }
     ReleaseSRWLockExclusive(&gp_lock);
 
+    CloseHandle(gp->stopping_event);
+    CloseHandle(gp->out_event);
+    CloseHandle(gp->delay_event);
     CloseHandle(gp->in_thread);
     CloseHandle(gp->out_thread);
     CloseHandle(gp->delay_thread);
@@ -166,14 +172,16 @@ static DWORD WINAPI _mi_input_thread_proc(LPVOID lparam)
 static DWORD WINAPI _mi_output_thread_proc(LPVOID lparam)
 {
     struct mi_gamepad *gp = (struct mi_gamepad *)lparam;
+    
+    HANDLE wait_events[2] = { gp->stopping_event, gp->out_event };
     BYTE vibration[3];
-
     vibration[MI_VIBRATION_HEADER] = init_vibration[MI_VIBRATION_HEADER];
     vibration[MI_VIBRATION_SMALL_MOTOR] = gp->small_motor;
     vibration[MI_VIBRATION_BIG_MOTOR] = gp->big_motor;
 
     while (gp->active)
     {
+        WaitForMultipleObjects(2, wait_events, FALSE, INFINITE);
         AcquireSRWLockShared(&gp->vibr_lock);
         if (gp->small_motor != vibration[MI_VIBRATION_SMALL_MOTOR] || gp->big_motor != vibration[MI_VIBRATION_BIG_MOTOR])
         {
@@ -186,6 +194,7 @@ static DWORD WINAPI _mi_output_thread_proc(LPVOID lparam)
         {
             ReleaseSRWLockShared(&gp->vibr_lock);
         }
+        ResetEvent(gp->out_event);
     }
 
     return 0;
@@ -195,17 +204,19 @@ static DWORD WINAPI _mi_delay_thread_proc(LPVOID lparam)
 {
     struct mi_gamepad *gp = (struct mi_gamepad *)lparam;
 
+    HANDLE wait_events[2] = { gp->stopping_event, gp->delay_event };
     HANDLE timer = CreateWaitableTimer(NULL, TRUE, NULL);
-    HANDLE wait_objects[2] = { gp->stopping_event, timer };
+    HANDLE wait_delay_objects[2] = { gp->stopping_event, timer };
     LARGE_INTEGER due_time;
     due_time.QuadPart = -2000000LL;
 
     while (gp->active)
     {
+        WaitForMultipleObjects(2, wait_events, FALSE, INFINITE);
         if (gp->hold_mi_btn)
         {
             SetWaitableTimer(timer, &due_time, 0, NULL, NULL, FALSE);
-            WaitForMultipleObjects(2, wait_objects, FALSE, INFINITE);
+            WaitForMultipleObjects(2, wait_delay_objects, FALSE, INFINITE);
 
             AcquireSRWLockExclusive(&gp->state_lock);
             gp->hold_mi_btn = FALSE;
@@ -214,6 +225,7 @@ static DWORD WINAPI _mi_delay_thread_proc(LPVOID lparam)
 
             gp->upd_cb(gp->id, &gp->state);
         }
+        ResetEvent(gp->delay_event);
     }
 
     CloseHandle(timer);
@@ -244,6 +256,8 @@ int mi_gamepad_start(struct hid_device *device, void (*upd_cb)(int, struct mi_st
     gp->stop_cb = stop_cb;
     gp->active = TRUE;
     gp->stopping_event = CreateEvent(&security, TRUE, FALSE, NULL);
+    gp->out_event = CreateEvent(&security, TRUE, FALSE, NULL);
+    gp->delay_event = CreateEvent(&security, TRUE, FALSE, NULL);
     InitializeSRWLock(&gp->vibr_lock);
     gp->small_motor = init_vibration[MI_VIBRATION_SMALL_MOTOR];
     gp->big_motor = init_vibration[MI_VIBRATION_BIG_MOTOR];
@@ -313,6 +327,7 @@ void mi_gamepad_set_vibration(int gamepad_id, BYTE small_motor, BYTE big_motor)
         cur_gp->small_motor = small_motor;
         cur_gp->big_motor = big_motor;
         ReleaseSRWLockExclusive(&cur_gp->vibr_lock);
+        SetEvent(cur_gp->out_event);
     }
 }
 
