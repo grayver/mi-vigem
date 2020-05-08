@@ -218,10 +218,12 @@ struct hid_device *hid_open_device(LPTSTR path, BOOL access_rw, BOOL shared)
 {
     DWORD desired_access = access_rw ? (GENERIC_WRITE | GENERIC_READ) : 0;
     DWORD share_mode = shared ? (FILE_SHARE_READ | FILE_SHARE_WRITE) : 0;
-    SECURITY_ATTRIBUTES security = {
+    SECURITY_ATTRIBUTES security =
+    {
         .nLength = sizeof(SECURITY_ATTRIBUTES),
         .lpSecurityDescriptor = NULL,
-        .bInheritHandle = TRUE};
+        .bInheritHandle = TRUE
+    };
     HANDLE handle = CreateFile(path, desired_access, share_mode, &security, OPEN_EXISTING, FILE_FLAG_OVERLAPPED, 0);
 
     if (handle == INVALID_HANDLE_VALUE)

@@ -228,10 +228,12 @@ int mi_gamepad_start(struct hid_device *device, void (*upd_cb)(int, struct mi_st
         return -1;
     }
 
-    SECURITY_ATTRIBUTES security = {
+    SECURITY_ATTRIBUTES security =
+    {
         .nLength = sizeof(SECURITY_ATTRIBUTES),
         .lpSecurityDescriptor = NULL,
-        .bInheritHandle = TRUE};
+        .bInheritHandle = TRUE
+    };
 
     struct mi_gamepad *gp = (struct mi_gamepad *)malloc(sizeof(struct mi_gamepad));
     gp->id = ++last_gamepad_id;

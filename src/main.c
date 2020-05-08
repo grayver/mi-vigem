@@ -290,6 +290,11 @@ static void mi_gamepad_update_cb(int gamepad_id, struct mi_state *state)
     }
     ReleaseSRWLockShared(&active_devices_lock);
 
+    if (active_device == NULL)
+    {
+        return;
+    }
+
     if (active_device->src_battery_level != state->battery)
     {
         active_device->src_battery_level = state->battery;
