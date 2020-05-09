@@ -3,7 +3,8 @@
 
 #include <wtypes.h>
 
-#define MI_HW_FILTER TEXT("VID&00022717_PID&3144")
+#define MI_HW_VENDOR_ID 0x2717
+#define MI_HW_PRODUCT_ID 0x3144
 
 #define MI_BUTTON_NONE      0x00000000
 #define MI_BUTTON_A         0x00000001

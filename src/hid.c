@@ -27,7 +27,7 @@ GUID hid_get_class()
     return hid_class;
 }
 
-struct hid_device_info *hid_enumerate(LPTSTR path_filter)
+struct hid_device_info *hid_enumerate(USHORT vendor_id, USHORT product_id)
 {
     struct hid_device_info *root_dev = NULL;
     struct hid_device_info *cur_dev = NULL;
@@ -64,7 +64,19 @@ struct hid_device_info *hid_enumerate(LPTSTR path_filter)
 
             if (SetupDiGetDeviceInterfaceDetail(device_info_set, &device_interface_data, device_interface_detail_data, required_size, NULL, NULL))
             {
-                if (path_filter == NULL || _tcsistr(device_interface_detail_data->DevicePath, path_filter) != NULL)
+                BOOL match = TRUE;
+                if (vendor_id != 0x0 || product_id != 0x0)
+                {
+                    HIDD_ATTRIBUTES attributes;
+                    HANDLE dev_handle = CreateFile(device_interface_detail_data->DevicePath, GENERIC_READ, FILE_SHARE_READ, NULL,
+                                                   OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, 0);
+                    attributes.Size = sizeof(HIDD_ATTRIBUTES);
+                    HidD_GetAttributes(dev_handle, &attributes);
+                    match = (vendor_id == 0x0 || attributes.VendorID == vendor_id) && (product_id == 0x0 || attributes.ProductID == product_id);
+                    CloseHandle(dev_handle);
+                }
+
+                if (match)
                 {
                     desc_buffer = NULL;
 

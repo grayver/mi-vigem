@@ -30,7 +30,7 @@ struct hid_device
 };
 
 GUID hid_get_class();
-struct hid_device_info *hid_enumerate(LPTSTR path_filter);
+struct hid_device_info *hid_enumerate(USHORT vendor_id, USHORT product_id);
 BOOL hid_reenable_device(LPTSTR path);
 void hid_free_device_info(struct hid_device_info *device_info);
 struct hid_device *hid_open_device(LPTSTR path, BOOL access_rw, BOOL shared);
