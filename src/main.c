@@ -45,9 +45,9 @@ static void CALLBACK x360_notification_cb(PVIGEM_CLIENT client, PVIGEM_TARGET ta
 static void refresh_cb(struct tray_menu *item);
 static void quit_cb(struct tray_menu *item);
 
-static const struct tray_menu tray_menu_refresh = { .text = "Refresh", .cb = refresh_cb };
-static const struct tray_menu tray_menu_quit = { .text = "Quit", .cb = quit_cb };
-static const struct tray_menu tray_menu_separator = { .text = "-" };
+static const struct tray_menu tray_menu_refresh = { .text = TEXT("Refresh"), .cb = refresh_cb };
+static const struct tray_menu tray_menu_quit = { .text = TEXT("Quit"), .cb = quit_cb };
+static const struct tray_menu tray_menu_separator = { .text = TEXT("-") };
 static const struct tray_menu tray_menu_terminator = { .text = NULL };
 static struct tray tray =
 {
@@ -271,7 +271,11 @@ static void refresh_devices()
 static void device_change_cb(UINT op, LPTSTR path)
 {
     // refresh devices regardless operation type
+#ifdef UNICODE
+    printf("Device operation %d with path %S\n", op, path);
+#else
     printf("Device operation %d with path %s\n", op, path);
+#endif
     fflush(stdout);
     refresh_devices();
 }

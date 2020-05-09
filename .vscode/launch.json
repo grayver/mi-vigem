@@ -11,7 +11,7 @@
             "cwd": "${workspaceFolder}",
             "environment": [],
             "externalConsole": false,
-            "preLaunchTask": "Build binary"
+            "preLaunchTask": "Build debug binary"
         }
     ]
 }

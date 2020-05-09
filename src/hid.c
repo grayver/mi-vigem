@@ -110,7 +110,7 @@ struct hid_device_info *hid_enumerate(USHORT vendor_id, USHORT product_id)
                             desc_buffer = (LPTSTR)malloc(required_size);
                             memset(desc_buffer, 0, required_size);
                             SetupDiGetDeviceRegistryProperty(device_info_set, &devinfo_data, SPDRP_DEVICEDESC,
-                                                             NULL, desc_buffer, required_size, NULL);
+                                                             NULL, (PBYTE)desc_buffer, required_size, NULL);
                         }
                     }
 

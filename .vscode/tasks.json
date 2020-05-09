@@ -16,11 +16,43 @@
     },
     {
       "type": "shell",
-      "label": "Build binary",
+      "label": "Build debug binary",
       "command": "cl.exe",
       "args": [
         "/Zi",
+        "/Od",
         "/EHsc",
+        "/DWIN32",
+        "/D_UNICODE",
+        "/DUNICODE",
+        "/Iinclude",
+        "/Foobj/",
+        "/Febin/mi-vigem.exe",
+        "lib/ViGEmClient/*.cpp",
+        "obj/mi-vigem.res",
+        "src/*.c"
+
+      ],
+      "problemMatcher": [
+        "$msCompile"
+      ],
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      }
+    },
+    {
+      "type": "shell",
+      "label": "Build release binary",
+      "command": "cl.exe",
+      "args": [
+        "/GL",
+        "/Zi",
+        "/O2",
+        "/EHsc",
+        "/DWIN32",
+        "/D_UNICODE",
+        "/DUNICODE",
         "/Iinclude",
         "/Foobj/",
         "/Febin/mi-vigem.exe",
@@ -31,10 +63,7 @@
       "problemMatcher": [
         "$msCompile"
       ],
-      "group": {
-        "kind": "build",
-        "isDefault": true
-      }
+      "group": "build"
     }
   ]
 }
