@@ -64,19 +64,34 @@ struct hid_device_info *hid_enumerate(USHORT vendor_id, USHORT product_id)
 
             if (SetupDiGetDeviceInterfaceDetail(device_info_set, &device_interface_data, device_interface_detail_data, required_size, NULL, NULL))
             {
-                BOOL match = TRUE;
+                BOOL matched = TRUE;
                 if (vendor_id != 0x0 || product_id != 0x0)
                 {
-                    HIDD_ATTRIBUTES attributes;
                     HANDLE dev_handle = CreateFile(device_interface_detail_data->DevicePath, GENERIC_READ, FILE_SHARE_READ, NULL,
                                                    OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, 0);
-                    attributes.Size = sizeof(HIDD_ATTRIBUTES);
-                    HidD_GetAttributes(dev_handle, &attributes);
-                    match = (vendor_id == 0x0 || attributes.VendorID == vendor_id) && (product_id == 0x0 || attributes.ProductID == product_id);
-                    CloseHandle(dev_handle);
+                    if (dev_handle != INVALID_HANDLE_VALUE)
+                    {
+                        HIDD_ATTRIBUTES attributes =
+                        {
+                            .Size = sizeof(HIDD_ATTRIBUTES)
+                        };
+                        if (HidD_GetAttributes(dev_handle, &attributes))
+                        {
+                            matched = (vendor_id == 0x0 || attributes.VendorID == vendor_id) && (product_id == 0x0 || attributes.ProductID == product_id);
+                        }
+                        else
+                        {
+                            matched = FALSE;
+                        }
+                        CloseHandle(dev_handle);
+                    }
+                    else
+                    {
+                        matched = FALSE;
+                    }
                 }
 
-                if (match)
+                if (matched)
                 {
                     desc_buffer = NULL;
 
@@ -198,13 +213,17 @@ BOOL hid_reenable_device(LPTSTR path)
         return FALSE;
     }
 
-    SP_PROPCHANGE_PARAMS pc_params = {
-        .ClassInstallHeader = {
+    SP_PROPCHANGE_PARAMS pc_params =
+    {
+        .ClassInstallHeader =
+        {
             .cbSize = sizeof(SP_CLASSINSTALL_HEADER),
-            .InstallFunction = DIF_PROPERTYCHANGE},
+            .InstallFunction = DIF_PROPERTYCHANGE
+        },
         .StateChange = DICS_DISABLE,
         .Scope = DICS_FLAG_GLOBAL,
-        .HwProfile = 0};
+        .HwProfile = 0
+    };
     BOOL res;
     res = SetupDiSetClassInstallParams(device_info_set, &devinfo_data, (PSP_CLASSINSTALL_HEADER)&pc_params,
                                         sizeof(SP_PROPCHANGE_PARAMS));
@@ -237,7 +256,6 @@ struct hid_device *hid_open_device(LPTSTR path, BOOL access_rw, BOOL shared)
         .bInheritHandle = TRUE
     };
     HANDLE handle = CreateFile(path, desired_access, share_mode, &security, OPEN_EXISTING, FILE_FLAG_OVERLAPPED, 0);
-
     if (handle == INVALID_HANDLE_VALUE)
     {
         return NULL;
