@@ -1,7 +1,7 @@
 /*
 MIT License
 
-Copyright (c) 2017 Benjamin "Nefarius" Höglinger
+Copyright (c) 2017-2019 Nefarius Software Solutions e.U. and Contributors
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -63,7 +63,9 @@ extern "C" {
         VIGEM_ERROR_CALLBACK_NOT_FOUND = 0xE0000011,
         VIGEM_ERROR_BUS_ALREADY_CONNECTED = 0xE0000012,
         VIGEM_ERROR_BUS_INVALID_HANDLE = 0xE0000013,
-        VIGEM_ERROR_XUSB_USERINDEX_OUT_OF_RANGE = 0xE0000014
+        VIGEM_ERROR_XUSB_USERINDEX_OUT_OF_RANGE = 0xE0000014,
+		VIGEM_ERROR_INVALID_PARAMETER = 0xE0000015
+
     } VIGEM_ERROR;
 
     /**
@@ -94,7 +96,7 @@ extern "C" {
 
     typedef
         _Function_class_(EVT_VIGEM_TARGET_ADD_RESULT)
-        VOID
+        VOID CALLBACK
         EVT_VIGEM_TARGET_ADD_RESULT(
             PVIGEM_CLIENT Client,
             PVIGEM_TARGET Target,
@@ -105,26 +107,28 @@ extern "C" {
 
     typedef
         _Function_class_(EVT_VIGEM_X360_NOTIFICATION)
-        VOID
+        VOID CALLBACK
         EVT_VIGEM_X360_NOTIFICATION(
             PVIGEM_CLIENT Client,
             PVIGEM_TARGET Target,
             UCHAR LargeMotor,
             UCHAR SmallMotor,
-            UCHAR LedNumber
+            UCHAR LedNumber,
+            LPVOID UserData
         );
 
     typedef EVT_VIGEM_X360_NOTIFICATION *PFN_VIGEM_X360_NOTIFICATION;
 
     typedef
         _Function_class_(EVT_VIGEM_DS4_NOTIFICATION)
-        VOID
+        VOID CALLBACK
         EVT_VIGEM_DS4_NOTIFICATION(
             PVIGEM_CLIENT Client,
             PVIGEM_TARGET Target,
             UCHAR LargeMotor,
             UCHAR SmallMotor,
-            DS4_LIGHTBAR_COLOR LightbarColor
+            DS4_LIGHTBAR_COLOR LightbarColor,
+            LPVOID UserData
         );
 
     typedef EVT_VIGEM_DS4_NOTIFICATION *PFN_VIGEM_DS4_NOTIFICATION;
@@ -289,10 +293,11 @@ extern "C" {
      * \param   vigem           The driver connection object.
      * \param   target          The target device object.
      * \param   notification    The notification callback.
+     * \param   userData        The user data passed to the notification callback.
      *
      * \return  A VIGEM_ERROR.
      */
-    VIGEM_API VIGEM_ERROR vigem_target_x360_register_notification(PVIGEM_CLIENT vigem, PVIGEM_TARGET target, PFN_VIGEM_X360_NOTIFICATION notification);
+    VIGEM_API VIGEM_ERROR vigem_target_x360_register_notification(PVIGEM_CLIENT vigem, PVIGEM_TARGET target, PFN_VIGEM_X360_NOTIFICATION notification, LPVOID userData);
 
     /**
      * \fn  VIGEM_ERROR vigem_target_ds4_register_notification(PVIGEM_CLIENT vigem, PVIGEM_TARGET target, PVIGEM_DS4_NOTIFICATION notification);
@@ -307,10 +312,11 @@ extern "C" {
      * \param   vigem           The driver connection object.
      * \param   target          The target device object.
      * \param   notification    The notification callback.
+     * \param   userData        The user data passed to the notification callback.
      *
      * \return  A VIGEM_ERROR.
      */
-    VIGEM_API VIGEM_ERROR vigem_target_ds4_register_notification(PVIGEM_CLIENT vigem, PVIGEM_TARGET target, PFN_VIGEM_DS4_NOTIFICATION notification);
+    VIGEM_API VIGEM_ERROR vigem_target_ds4_register_notification(PVIGEM_CLIENT vigem, PVIGEM_TARGET target, PFN_VIGEM_DS4_NOTIFICATION notification, LPVOID userData);
 
     /**
      * \fn  void vigem_target_x360_unregister_notification(PVIGEM_TARGET target);
