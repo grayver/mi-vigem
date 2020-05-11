@@ -4,8 +4,7 @@ XBox360 controller emulation for Xiaomi gamepad. Supports multiple devices and v
 XBox360 emulation driver is provided by ViGEm (https://github.com/ViGEm/ViGEmBus), by Benjamin Höglinger.
 
 ## Requirements
-- Windows 7 or newer
-- Microsoft Visual C++ 2019 redistributable (can be downloaded [here](https://support.microsoft.com/en-us/help/2977003/the-latest-supported-visual-c-downloads))
+- Windows 10 (should work on Windows 7 and 8 also)
 - ViGEm bus installed (can be downloaded [here](https://github.com/ViGEm/ViGEmBus/releases))
 
 ## How it works
