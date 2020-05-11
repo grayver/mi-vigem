@@ -211,7 +211,8 @@ static BOOL remove_device(int mi_gamepad_id)
 
 static void refresh_devices()
 {
-    struct hid_device_info *device_info = hid_enumerate(MI_HW_VENDOR_ID, MI_HW_PRODUCT_ID);
+    LPTSTR mi_hw_path_filters[3] = { MI_HW_FILTER_WIN10, MI_HW_FILTER_WIN7, NULL };
+    struct hid_device_info *device_info = hid_enumerate(mi_hw_path_filters);
     struct hid_device_info *cur;
     BOOL found = FALSE;
 

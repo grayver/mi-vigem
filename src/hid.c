@@ -27,7 +27,7 @@ GUID hid_get_class()
     return hid_class;
 }
 
-struct hid_device_info *hid_enumerate(USHORT vendor_id, USHORT product_id)
+struct hid_device_info *hid_enumerate(const LPTSTR *path_filters)
 {
     struct hid_device_info *root_dev = NULL;
     struct hid_device_info *cur_dev = NULL;
@@ -65,29 +65,16 @@ struct hid_device_info *hid_enumerate(USHORT vendor_id, USHORT product_id)
             if (SetupDiGetDeviceInterfaceDetail(device_info_set, &device_interface_data, device_interface_detail_data, required_size, NULL, NULL))
             {
                 BOOL matched = TRUE;
-                if (vendor_id != 0x0 || product_id != 0x0)
+                if (path_filters != NULL)
                 {
-                    HANDLE dev_handle = CreateFile(device_interface_detail_data->DevicePath, GENERIC_READ, FILE_SHARE_READ, NULL,
-                                                   OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, 0);
-                    if (dev_handle != INVALID_HANDLE_VALUE)
+                    matched = FALSE;
+                    for (const LPTSTR *pfilter = path_filters; *pfilter != NULL; pfilter++)
                     {
-                        HIDD_ATTRIBUTES attributes =
+                        if (_tcsistr(device_interface_detail_data->DevicePath, *pfilter) != NULL)
                         {
-                            .Size = sizeof(HIDD_ATTRIBUTES)
-                        };
-                        if (HidD_GetAttributes(dev_handle, &attributes))
-                        {
-                            matched = (vendor_id == 0x0 || attributes.VendorID == vendor_id) && (product_id == 0x0 || attributes.ProductID == product_id);
+                            matched = TRUE;
+                            break;
                         }
-                        else
-                        {
-                            matched = FALSE;
-                        }
-                        CloseHandle(dev_handle);
-                    }
-                    else
-                    {
-                        matched = FALSE;
                     }
                 }
 
@@ -236,6 +223,29 @@ BOOL hid_reenable_device(LPTSTR path)
     free(inst_id);
     SetupDiDestroyDeviceInfoList(device_info_set);
     return res;
+}
+
+BOOL check_vendor_and_product(LPTSTR path, USHORT vendor_id, USHORT product_id)
+{
+    HANDLE dev_handle = CreateFile(path, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, 0);
+    if (dev_handle != INVALID_HANDLE_VALUE)
+    {
+        BOOL matched = FALSE;
+        HIDD_ATTRIBUTES attributes =
+        {
+            .Size = sizeof(HIDD_ATTRIBUTES)
+        };
+        if (HidD_GetAttributes(dev_handle, &attributes))
+        {
+            matched = (vendor_id == 0x0 || attributes.VendorID == vendor_id) && (product_id == 0x0 || attributes.ProductID == product_id);
+        }
+        CloseHandle(dev_handle);
+        return matched;
+    }
+    else
+    {
+        return FALSE;
+    }
 }
 
 void hid_free_device_info(struct hid_device_info *device_info)
