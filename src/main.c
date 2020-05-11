@@ -41,7 +41,7 @@ static BOOL vigem_connected = FALSE;
 static void mi_gamepad_update_cb(int gamepad_id, struct mi_state *state);
 static void mi_gamepad_stop_cb(int gamepad_id, BYTE break_reason);
 static void CALLBACK x360_notification_cb(PVIGEM_CLIENT client, PVIGEM_TARGET target, UCHAR large_motor,
-                                          UCHAR small_motor, UCHAR led_number);
+                                          UCHAR small_motor, UCHAR led_number, LPVOID user_data);
 static void refresh_cb(struct tray_menu *item);
 static void quit_cb(struct tray_menu *item);
 
@@ -148,7 +148,8 @@ static BOOL add_device(LPTSTR path)
         active_device->tgt_device = vigem_target_x360_alloc();
         vigem_target_add(vigem_client, active_device->tgt_device);
         XUSB_REPORT_INIT(&active_device->tgt_report);
-        vigem_target_x360_register_notification(vigem_client, active_device->tgt_device, x360_notification_cb);
+        vigem_target_x360_register_notification(vigem_client, active_device->tgt_device, x360_notification_cb,
+                                                (LPVOID)&active_device->src_gamepad_id);
     }
     int tray_text_length = _sctprintf(ACTIVE_DEVICE_MENU_TEMPLATE, active_device->index, BATTERY_NA_TEXT);
     active_device->tray_text = (LPTSTR)malloc((tray_text_length + 1) * sizeof(TCHAR));
@@ -373,19 +374,9 @@ static void mi_gamepad_stop_cb(int gamepad_id, BYTE break_reason)
 }
 
 static void CALLBACK x360_notification_cb(PVIGEM_CLIENT client, PVIGEM_TARGET target, UCHAR large_motor,
-                                          UCHAR small_motor, UCHAR led_number)
+                                          UCHAR small_motor, UCHAR led_number, LPVOID user_data)
 {
-    int mi_gamepad_id = -1;
-    AcquireSRWLockShared(&active_devices_lock);
-    for (int i = 0; i < active_device_count; i++)
-    {
-        if (active_devices[i]->tgt_device == target)
-        {
-            mi_gamepad_id = active_devices[i]->src_gamepad_id;
-            break;
-        }
-    }
-    ReleaseSRWLockShared(&active_devices_lock);
+    int mi_gamepad_id = *((int *)user_data);
     if (mi_gamepad_id >= 0)
     {
         mi_gamepad_set_vibration(mi_gamepad_id, small_motor, large_motor);
