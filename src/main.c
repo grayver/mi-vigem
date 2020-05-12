@@ -138,7 +138,7 @@ static BOOL add_device(LPTSTR path)
         return FALSE;
     }
 
-    struct active_device* active_device = (struct active_device *)malloc(sizeof(struct active_device));
+    struct active_device *active_device = (struct active_device *)malloc(sizeof(struct active_device));
     active_device->src_device = device;
     active_device->index = ++last_active_device_index;
     active_device->src_gamepad_id = mi_gamepad_id;
@@ -149,7 +149,7 @@ static BOOL add_device(LPTSTR path)
         vigem_target_add(vigem_client, active_device->tgt_device);
         XUSB_REPORT_INIT(&active_device->tgt_report);
         vigem_target_x360_register_notification(vigem_client, active_device->tgt_device, x360_notification_cb,
-                                                (LPVOID)&active_device->src_gamepad_id);
+                                                (LPVOID)active_device);
     }
     int tray_text_length = _sctprintf(ACTIVE_DEVICE_MENU_TEMPLATE, active_device->index, BATTERY_NA_TEXT);
     active_device->tray_text = (LPTSTR)malloc((tray_text_length + 1) * sizeof(TCHAR));
@@ -284,7 +284,7 @@ static void device_change_cb(UINT op, LPTSTR path)
 
 static void mi_gamepad_update_cb(int gamepad_id, struct mi_state *state)
 {
-    struct active_device* active_device = NULL;
+    struct active_device *active_device = NULL;
     AcquireSRWLockShared(&active_devices_lock);
     for (int i = 0; i < active_device_count; i++)
     {
@@ -376,11 +376,8 @@ static void mi_gamepad_stop_cb(int gamepad_id, BYTE break_reason)
 static void CALLBACK x360_notification_cb(PVIGEM_CLIENT client, PVIGEM_TARGET target, UCHAR large_motor,
                                           UCHAR small_motor, UCHAR led_number, LPVOID user_data)
 {
-    int mi_gamepad_id = *((int *)user_data);
-    if (mi_gamepad_id >= 0)
-    {
-        mi_gamepad_set_vibration(mi_gamepad_id, small_motor, large_motor);
-    }
+    struct active_device *active_device = (struct active_device *)user_data;
+    mi_gamepad_set_vibration(active_device->src_gamepad_id, small_motor, large_motor);
 }
 
 static void refresh_cb(struct tray_menu *item)

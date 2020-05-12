@@ -197,6 +197,9 @@ static DWORD WINAPI _mi_output_thread_proc(LPVOID lparam)
         ResetEvent(gp->out_event);
     }
 
+    // turn off vibration
+    hid_send_feature_report(gp->device, init_vibration, sizeof(init_vibration));
+
     return 0;
 }
 
