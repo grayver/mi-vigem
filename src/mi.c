@@ -173,7 +173,11 @@ static DWORD WINAPI _mi_output_thread_proc(LPVOID lparam)
 {
     struct mi_gamepad *gp = (struct mi_gamepad *)lparam;
     
-    HANDLE wait_events[2] = { gp->stopping_event, gp->out_event };
+    HANDLE dummy_event = CreateEvent(NULL, TRUE, FALSE, NULL);
+    HANDLE wait_events[3] = { gp->stopping_event, gp->out_event, dummy_event };
+    HANDLE timer = CreateWaitableTimer(NULL, TRUE, NULL);
+    LARGE_INTEGER due_time;
+    due_time.QuadPart = -30000000LL; // 3 sec
     BYTE vibration[3];
     vibration[MI_VIBRATION_HEADER] = init_vibration[MI_VIBRATION_HEADER];
     vibration[MI_VIBRATION_SMALL_MOTOR] = gp->small_motor;
@@ -181,12 +185,34 @@ static DWORD WINAPI _mi_output_thread_proc(LPVOID lparam)
 
     while (gp->active)
     {
-        WaitForMultipleObjects(2, wait_events, FALSE, INFINITE);
+        DWORD wait_result = WaitForMultipleObjects(3, wait_events, FALSE, INFINITE);
+        // if timer signaled
+        if (wait_result == WAIT_OBJECT_0 + 2)
+        {
+            AcquireSRWLockExclusive(&gp->vibr_lock);
+            gp->small_motor = 0;
+            gp->big_motor = 0;
+            ReleaseSRWLockExclusive(&gp->vibr_lock);
+            wait_events[2] = dummy_event;
+        }
+
         AcquireSRWLockShared(&gp->vibr_lock);
         if (gp->small_motor != vibration[MI_VIBRATION_SMALL_MOTOR] || gp->big_motor != vibration[MI_VIBRATION_BIG_MOTOR])
         {
             vibration[MI_VIBRATION_SMALL_MOTOR] = gp->small_motor;
             vibration[MI_VIBRATION_BIG_MOTOR] = gp->big_motor;
+
+            if (gp->small_motor != 0 || gp->big_motor != 0)
+            {
+                SetWaitableTimer(timer, &due_time, 0, NULL, NULL, FALSE);
+                wait_events[2] = timer;
+            }
+            else if (wait_events[2] == timer)
+            {
+                CancelWaitableTimer(timer);
+                wait_events[2] = dummy_event;
+            }
+
             ReleaseSRWLockShared(&gp->vibr_lock);
             hid_send_feature_report(gp->device, vibration, sizeof(vibration));
         }
@@ -200,6 +226,9 @@ static DWORD WINAPI _mi_output_thread_proc(LPVOID lparam)
     // turn off vibration
     hid_send_feature_report(gp->device, init_vibration, sizeof(init_vibration));
 
+    CloseHandle(dummy_event);
+    CloseHandle(timer);
+
     return 0;
 }
 
@@ -211,7 +240,7 @@ static DWORD WINAPI _mi_delay_thread_proc(LPVOID lparam)
     HANDLE timer = CreateWaitableTimer(NULL, TRUE, NULL);
     HANDLE wait_delay_objects[2] = { gp->stopping_event, timer };
     LARGE_INTEGER due_time;
-    due_time.QuadPart = -2000000LL;
+    due_time.QuadPart = -2000000LL; // 200 msec
 
     while (gp->active)
     {
