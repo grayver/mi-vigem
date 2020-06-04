@@ -177,7 +177,7 @@ static DWORD WINAPI _mi_output_thread_proc(LPVOID lparam)
     HANDLE wait_events[3] = { gp->stopping_event, gp->out_event, dummy_event };
     HANDLE timer = CreateWaitableTimer(NULL, TRUE, NULL);
     LARGE_INTEGER due_time;
-    due_time.QuadPart = -30000000LL; // 3 sec
+    due_time.QuadPart = -20000000LL; // 2 sec
     BYTE vibration[3];
     vibration[MI_VIBRATION_HEADER] = init_vibration[MI_VIBRATION_HEADER];
     vibration[MI_VIBRATION_SMALL_MOTOR] = gp->small_motor;
