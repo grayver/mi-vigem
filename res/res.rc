@@ -3,8 +3,8 @@
 APP_ICON            ICON "icon.ico"
 
 VS_VERSION_INFO     VERSIONINFO
-FILEVERSION         1,0,0,0
-PRODUCTVERSION      1,0,0,0
+FILEVERSION         1,0,1,0
+PRODUCTVERSION      1,0,1,0
 FILETYPE            VFT_APP
 BEGIN
     BLOCK "StringFileInfo"
@@ -12,11 +12,11 @@ BEGIN
         BLOCK "040904E4"
         BEGIN
             VALUE "FileDescription",  "Mi-ViGEm application"
-            VALUE "FileVersion",      "1.0.0.0"
+            VALUE "FileVersion",      "1.0.1.0"
             VALUE "LegalCopyright",   "Grayver"
             VALUE "OriginalFilename", "mi-vigem.exe"
             VALUE "ProductName",      "Mi-ViGEm"
-            VALUE "ProductVersion",   "1.0.0.0"
+            VALUE "ProductVersion",   "1.0.1.0"
         END
     END
     BLOCK "VarFileInfo"
