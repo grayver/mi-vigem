@@ -213,11 +213,11 @@ BOOL hid_reenable_device(LPTSTR path)
     };
     BOOL res;
     res = SetupDiSetClassInstallParams(device_info_set, &devinfo_data, (PSP_CLASSINSTALL_HEADER)&pc_params,
-                                        sizeof(SP_PROPCHANGE_PARAMS));
+                                       sizeof(SP_PROPCHANGE_PARAMS));
     res = res && SetupDiCallClassInstaller(DIF_PROPERTYCHANGE, device_info_set, &devinfo_data);
     pc_params.StateChange = DICS_ENABLE;
     res = res && SetupDiSetClassInstallParams(device_info_set, &devinfo_data, (PSP_CLASSINSTALL_HEADER)&pc_params,
-                                                sizeof(SP_PROPCHANGE_PARAMS));
+                                              sizeof(SP_PROPCHANGE_PARAMS));
     res = res && SetupDiCallClassInstaller(DIF_PROPERTYCHANGE, device_info_set, &devinfo_data);
 
     free(inst_id);
@@ -396,7 +396,7 @@ INT hid_send_feature_report(struct hid_device *device, const void *data, size_t 
 
 void hid_close_device(struct hid_device *device)
 {
-    CancelIo(device->handle);
+    CancelIoEx(device->handle, NULL);
     CloseHandle(device->input_ol.hEvent);
     CloseHandle(device->handle);
 }
