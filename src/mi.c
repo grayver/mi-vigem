@@ -78,10 +78,19 @@ static DWORD WINAPI _mi_input_thread_proc(LPVOID lparam)
 
         while ((bytes_read = hid_get_input_report(gp->device, MI_READ_TIMEOUT)) == 0)
         {
-            ;
+            if (!gp->active)
+            {
+                break_reason = MI_BREAK_REASON_REQUESTED;
+                break;
+            }
         }
 
-        if (bytes_read < 0)
+        if (!gp->active)
+        {
+            break_reason = MI_BREAK_REASON_REQUESTED;
+            break;
+        }
+        else if (bytes_read < 0)
         {
             break_reason = MI_BREAK_REASON_READ_ERROR;
             break;
@@ -372,6 +381,7 @@ void mi_gamepad_stop(int gamepad_id)
         if (cur_gp->id == gamepad_id)
         {
             cur_gp->active = FALSE;
+            CancelIoEx(cur_gp->device->handle, &cur_gp->device->input_ol);
             break;
         }
         cur_gp = cur_gp->next;
