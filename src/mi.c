@@ -70,29 +70,14 @@ static DWORD WINAPI _mi_input_thread_proc(LPVOID lparam)
 
     while (TRUE)
     {
-        if (!gp->active)
+        while (gp->active && (bytes_read = hid_get_input_report(gp->device, MI_READ_TIMEOUT)) == 0)
         {
-            break_reason = MI_BREAK_REASON_REQUESTED;
-            break;
+            ;
         }
 
-        while ((bytes_read = hid_get_input_report(gp->device, MI_READ_TIMEOUT)) == 0)
+        if (!gp->active || bytes_read < 0)
         {
-            if (!gp->active)
-            {
-                break_reason = MI_BREAK_REASON_REQUESTED;
-                break;
-            }
-        }
-
-        if (!gp->active)
-        {
-            break_reason = MI_BREAK_REASON_REQUESTED;
-            break;
-        }
-        else if (bytes_read < 0)
-        {
-            break_reason = MI_BREAK_REASON_READ_ERROR;
+            break_reason = !gp->active ? MI_BREAK_REASON_REQUESTED : MI_BREAK_REASON_READ_ERROR;
             break;
         }
 
