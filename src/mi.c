@@ -37,11 +37,11 @@ struct mi_gamepad
     struct hid_device *device;
     SRWLOCK state_lock;
     struct mi_state state;
-    BOOL hold_mi_btn;
+    BOOLEAN hold_mi_btn;
     void (*upd_cb)(int, struct mi_state *);
     void (*stop_cb)(int, BYTE);
 
-    BOOL active;
+    BOOLEAN active;
     HANDLE stopping_event;
 
     HANDLE in_thread;

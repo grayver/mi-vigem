@@ -14,7 +14,7 @@
 #pragma comment(lib, "setupapi.lib")
 #pragma comment(lib, "cfgmgr32.lib")
 
-static BOOL got_hid_class = FALSE;
+static BOOLEAN got_hid_class = FALSE;
 static GUID hid_class;
 
 GUID hid_get_class()
@@ -64,7 +64,7 @@ struct hid_device_info *hid_enumerate(const LPTSTR *path_filters)
 
             if (SetupDiGetDeviceInterfaceDetail(device_info_set, &device_interface_data, device_interface_detail_data, required_size, NULL, NULL))
             {
-                BOOL matched = TRUE;
+                BOOLEAN matched = TRUE;
                 if (path_filters != NULL)
                 {
                     matched = FALSE;
@@ -147,7 +147,7 @@ struct hid_device_info *hid_enumerate(const LPTSTR *path_filters)
     return root_dev;
 }
 
-BOOL hid_reenable_device(LPTSTR path)
+BOOLEAN hid_reenable_device(LPTSTR path)
 {
     GUID class_guid = hid_get_class();
     SP_DEVINFO_DATA devinfo_data;
@@ -211,7 +211,7 @@ BOOL hid_reenable_device(LPTSTR path)
         .Scope = DICS_FLAG_GLOBAL,
         .HwProfile = 0
     };
-    BOOL res;
+    BOOLEAN res;
     res = SetupDiSetClassInstallParams(device_info_set, &devinfo_data, (PSP_CLASSINSTALL_HEADER)&pc_params,
                                        sizeof(SP_PROPCHANGE_PARAMS));
     res = res && SetupDiCallClassInstaller(DIF_PROPERTYCHANGE, device_info_set, &devinfo_data);
@@ -225,12 +225,12 @@ BOOL hid_reenable_device(LPTSTR path)
     return res;
 }
 
-BOOL check_vendor_and_product(LPTSTR path, USHORT vendor_id, USHORT product_id)
+BOOLEAN check_vendor_and_product(LPTSTR path, USHORT vendor_id, USHORT product_id)
 {
     HANDLE dev_handle = CreateFile(path, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, 0);
     if (dev_handle != INVALID_HANDLE_VALUE)
     {
-        BOOL matched = FALSE;
+        BOOLEAN matched = FALSE;
         HIDD_ATTRIBUTES attributes =
         {
             .Size = sizeof(HIDD_ATTRIBUTES)
@@ -255,7 +255,7 @@ void hid_free_device_info(struct hid_device_info *device_info)
     free(device_info);
 }
 
-struct hid_device *hid_open_device(LPTSTR path, BOOL access_rw, BOOL shared)
+struct hid_device *hid_open_device(LPTSTR path, BOOLEAN access_rw, BOOLEAN shared)
 {
     DWORD desired_access = access_rw ? (GENERIC_WRITE | GENERIC_READ) : 0;
     DWORD share_mode = shared ? (FILE_SHARE_READ | FILE_SHARE_WRITE) : 0;

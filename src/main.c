@@ -9,6 +9,7 @@
 #include "tray.h"
 #include "hid.h"
 #include "mi.h"
+#include "hid_hide.h"
 
 #ifndef _DEBUG
 #pragma comment(linker, "/SUBSYSTEM:windows /ENTRY:mainCRTStartup")
@@ -28,6 +29,7 @@ struct active_device
     XUSB_REPORT tgt_report;
     LPTSTR tray_text;
     struct tray_menu *tray_menu;
+    BOOLEAN hid_hidden;
 };
 
 static int last_active_device_index = 0;
@@ -35,7 +37,8 @@ static int active_device_count = 0;
 static struct active_device *active_devices[MAX_ACTIVE_DEVICE_COUNT];
 static SRWLOCK active_devices_lock = SRWLOCK_INIT;
 static PVIGEM_CLIENT vigem_client;
-static BOOL vigem_connected = FALSE;
+static BOOLEAN vigem_connected = FALSE;
+static BOOLEAN hid_hide_connected = FALSE;
 
 // future declarations
 static void mi_gamepad_update_cb(int gamepad_id, struct mi_state *state);
@@ -56,7 +59,7 @@ static struct tray tray =
     .menu = NULL
 };
 
-SHORT FORCEINLINE _map_byte_to_short(BYTE value, BOOL inverted)
+SHORT FORCEINLINE _map_byte_to_short(BYTE value, BOOLEAN inverted)
 {
     CHAR centered = value - 128;
     if (centered < -127)
@@ -95,7 +98,7 @@ static void rebuild_tray_menu()
     free(prev_menu);
 }
 
-static BOOL add_device(LPTSTR path)
+static BOOLEAN add_device(LPTSTR path)
 {
     if (active_device_count == MAX_ACTIVE_DEVICE_COUNT)
     {
@@ -157,6 +160,7 @@ static BOOL add_device(LPTSTR path)
     active_device->tray_menu = (struct tray_menu *)malloc(sizeof(struct tray_menu));
     memset(active_device->tray_menu, 0, sizeof(struct tray_menu));
     active_device->tray_menu->text = active_device->tray_text;
+    active_device->hid_hidden = hid_hide_bind(device->path) == HID_HIDE_RESULT_OK;
 
     AcquireSRWLockExclusive(&active_devices_lock);
     active_devices[active_device_count++] = active_device;
@@ -177,14 +181,18 @@ static BOOL add_device(LPTSTR path)
     return TRUE;
 }
 
-static BOOL remove_device(int mi_gamepad_id)
+static BOOLEAN remove_device(int mi_gamepad_id)
 {
-    BOOL removed = FALSE;
+    BOOLEAN removed = FALSE;
     AcquireSRWLockExclusive(&active_devices_lock);
     for (int i = 0; i < active_device_count; i++)
     {
         if (active_devices[i]->src_gamepad_id == mi_gamepad_id)
         {
+            if (active_devices[i]->hid_hidden)
+            {
+                hid_hide_unbind(active_devices[i]->src_device->path);
+            }
             hid_close_device(active_devices[i]->src_device);
             hid_free_device(active_devices[i]->src_device);
             if (vigem_connected)
@@ -215,7 +223,7 @@ static void refresh_devices()
     LPTSTR mi_hw_path_filters[3] = { MI_HW_FILTER_WIN10, MI_HW_FILTER_WIN7, NULL };
     struct hid_device_info *device_info = hid_enumerate(mi_hw_path_filters);
     struct hid_device_info *cur;
-    BOOL found = FALSE;
+    BOOLEAN found = FALSE;
 
     // remove missing devices
     AcquireSRWLockShared(&active_devices_lock);
@@ -425,6 +433,16 @@ int main()
     {
         vigem_connected = TRUE;
     }
+    int hid_hide_res = hid_hide_init();
+    if (hid_hide_res == HID_HIDE_INIT_ERROR)
+    {
+        tray_show_notification(NT_TRAY_ERROR, TEXT("HidHide connection"),
+                               TEXT("Error initializing HidHide"));
+    }
+    else if (hid_hide_res == HID_HIDE_RESULT_OK)
+    {
+        hid_hide_connected = TRUE;
+    }
     refresh_devices();
     tray_register_device_notification(hid_get_class(), device_change_cb);
 
@@ -436,6 +454,10 @@ int main()
     AcquireSRWLockExclusive(&active_devices_lock);
     for (int i = 0; i < active_device_count; i++)
     {
+        if (active_devices[i]->hid_hidden)
+        {
+            hid_hide_unbind(active_devices[i]->src_device->path);
+        }
         hid_close_device(active_devices[i]->src_device);
         hid_free_device(active_devices[i]->src_device);
         if (vigem_connected)
@@ -455,6 +477,10 @@ int main()
         vigem_disconnect(vigem_client);
     }
     vigem_free(vigem_client);
+    if (hid_hide_connected)
+    {
+        hid_hide_free();
+    }
     free(tray.menu);
     return 0;
 }
