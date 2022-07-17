@@ -268,8 +268,8 @@ static LPTSTR _hh_get_app_image_name()
         {
             WCHAR filename_wo_mount_point[UNICODE_STRING_MAX_CHARS];
             wcscpy(filename_wo_mount_point, module_filename + wcslen(mount_point));
-            LPWSTR result_w = (LPWSTR)malloc((wcslen(dos_device_name) +1 + wcslen(filename_wo_mount_point)) * sizeof(WCHAR));
-            wcscat(wcscat(wcscpy(result, dos_device_name), "\\"), filename_wo_mount_point);
+            LPWSTR result_w = (LPWSTR)malloc((wcslen(dos_device_name) + 1 + wcslen(filename_wo_mount_point) + 1) * sizeof(WCHAR));
+            wcscat(wcscat(wcscpy(result_w, dos_device_name), L"\\"), filename_wo_mount_point);
 #ifdef UNICODE
             result = result_w;
 #else
@@ -372,9 +372,12 @@ int hid_hide_bind(LPTSTR dev_path)
         dev_el->value = (LPTSTR)malloc((_tcslen(dev_path) + 1) * sizeof(TCHAR));
         _tcscpy(dev_el->value, dev_path);
         dev_el->next = NULL;
-        prev->next = dev_el;
+        if (prev != NULL)
+        {
+            prev->next = dev_el;
+        }
 
-        _hh_get_black_list(hh_ctx->handle, hh_ctx->black_list);
+        _hh_set_black_list(hh_ctx->handle, hh_ctx->black_list);
 
         return HID_HIDE_RESULT_OK;
     }
@@ -406,12 +409,9 @@ void hid_hide_unbind(LPTSTR dev_path)
             prev = cur;
             cur = cur->next;
         }
-        _hh_get_black_list(hh_ctx->handle, hh_ctx->black_list);
 
-        return HID_HIDE_RESULT_OK;
+        _hh_set_black_list(hh_ctx->handle, hh_ctx->black_list);
     }
-
-    return HID_HIDE_NOT_INITIALIZED; // HidHide wasn't properly initialized
 }
 
 void hid_hide_free()
