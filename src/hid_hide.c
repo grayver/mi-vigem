@@ -31,6 +31,7 @@ struct hid_hide_ctx
 {
     HANDLE handle;
 
+    BOOLEAN initially_active;
     BOOLEAN active;
     struct hh_str_arr *black_list;
     struct hh_str_arr *white_list;
@@ -80,6 +81,7 @@ static LPWSTR _hh_arr_to_multi_string(struct hh_str_arr* input_arr, LPDWORD outp
     struct hh_str_arr *cur = input_arr;
     LPWSTR buffer = NULL;
     DWORD allocated_len = 0;
+    
     while (cur)
     {
         size_t len_to_alloc = _tcslen(cur->value) + 1;
@@ -92,6 +94,12 @@ static LPWSTR _hh_arr_to_multi_string(struct hh_str_arr* input_arr, LPDWORD outp
         allocated_len += len_to_alloc;
         cur = cur->next;
     }
+
+    // add one extra trailing \0
+    buffer = (LPWSTR)realloc(buffer, (allocated_len + 1) * sizeof(WCHAR));
+    buffer[allocated_len] = L'\0';
+    allocated_len++;
+
     *output_len = allocated_len;
     return buffer;
 }
@@ -302,7 +310,7 @@ int hid_hide_init()
 
     hh_ctx = (struct hid_hide_ctx *)malloc(sizeof(struct hid_hide_ctx));
     hh_ctx->handle = handle;
-    hh_ctx->active = _hh_get_active(handle);
+    hh_ctx->active = hh_ctx->initially_active = _hh_get_active(handle);
     hh_ctx->black_list = _hh_get_black_list(handle);
     hh_ctx->white_list = _hh_get_white_list(handle);
     hh_ctx->inverse = _hh_get_inverse(handle);
@@ -350,17 +358,24 @@ int hid_hide_init()
         free(app_image_name);
     }
 
+    // activate HidHide
+    if (!hh_ctx->active)
+    {
+        _hh_set_active(hh_ctx->handle, TRUE);
+        hh_ctx->active = TRUE;
+    }
+
     return HID_HIDE_RESULT_OK;
 }
 
-int hid_hide_bind(LPTSTR dev_path)
+int hid_hide_bind(struct hid_device_info *dev_info)
 {
     if (hh_ctx != NULL)
     {
         struct hh_str_arr *cur = hh_ctx->black_list, *prev = NULL;
         while (cur)
         {
-            if (_tcscmp(cur->value, dev_path) == 0)
+            if (_tcscmp(cur->value, dev_info->instance_path) == 0)
             {
                 return HID_HIDE_RESULT_OK; // already in black list
             }
@@ -369,12 +384,30 @@ int hid_hide_bind(LPTSTR dev_path)
         }
 
         struct hh_str_arr *dev_el = (struct hh_str_arr *)malloc(sizeof(struct hh_str_arr));
-        dev_el->value = (LPTSTR)malloc((_tcslen(dev_path) + 1) * sizeof(TCHAR));
-        _tcscpy(dev_el->value, dev_path);
+        dev_el->value = (LPTSTR)malloc((_tcslen(dev_info->instance_path) + 1) * sizeof(TCHAR));
+        _tcscpy(dev_el->value, dev_info->instance_path);
         dev_el->next = NULL;
+
+        // Since Xiaomi Gamepad doesn't have other sibling devices within BTENUM container
+        // in Windows configuration manager, we can add parent container device to black list too.
+        // However, this is not generally true for other gamepad vendors.
+        // (This logic based on official HidHideClient behavior)
+        if (dev_info->container_instance_path != NULL)
+        {
+            struct hh_str_arr *par_el = (struct hh_str_arr *)malloc(sizeof(struct hh_str_arr));
+            par_el->value = (LPTSTR)malloc((_tcslen(dev_info->container_instance_path) + 1) * sizeof(TCHAR));
+            _tcscpy(par_el->value, dev_info->container_instance_path);
+            par_el->next = NULL;
+            dev_el->next = par_el;
+        }
+
         if (prev != NULL)
         {
             prev->next = dev_el;
+        }
+        else
+        {
+            hh_ctx->black_list = dev_el;
         }
 
         _hh_set_black_list(hh_ctx->handle, hh_ctx->black_list);
@@ -385,14 +418,15 @@ int hid_hide_bind(LPTSTR dev_path)
     return HID_HIDE_NOT_INITIALIZED; // HidHide wasn't properly initialized
 }
 
-void hid_hide_unbind(LPTSTR dev_path)
+void hid_hide_unbind(struct hid_device_info *dev_info)
 {
     if (hh_ctx != NULL)
     {
         struct hh_str_arr *cur = hh_ctx->black_list, *prev = NULL;
         while (cur)
         {
-            if (_tcscmp(cur->value, dev_path) == 0)
+            if (_tcscmp(cur->value, dev_info->instance_path) == 0
+                || dev_info->container_instance_path != NULL && _tcscmp(cur->value, dev_info->container_instance_path) == 0)
             {
                 if (prev != NULL)
                 {
@@ -402,12 +436,16 @@ void hid_hide_unbind(LPTSTR dev_path)
                 {
                     hh_ctx->black_list = cur->next;
                 }
+                struct hh_str_arr *tmp = cur->next;
                 free(cur->value);
                 free(cur);
-                break;
+                cur = tmp;
             }
-            prev = cur;
-            cur = cur->next;
+            else
+            {
+                prev = cur;
+                cur = cur->next;
+            }
         }
 
         _hh_set_black_list(hh_ctx->handle, hh_ctx->black_list);
@@ -418,6 +456,13 @@ void hid_hide_free()
 {
     if (hh_ctx != NULL)
     {
+        // restore initial state of HidHide
+        if (!hh_ctx->initially_active)
+        {
+            _hh_set_active(hh_ctx->handle, FALSE);
+            hh_ctx->active = FALSE;
+        }
+
         CloseHandle(hh_ctx->handle);
         if (hh_ctx->black_list != NULL)
         {

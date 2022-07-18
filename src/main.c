@@ -98,7 +98,7 @@ static void rebuild_tray_menu()
     free(prev_menu);
 }
 
-static BOOLEAN add_device(LPTSTR path)
+static BOOLEAN add_device(struct hid_device_info *device_info)
 {
     if (active_device_count == MAX_ACTIVE_DEVICE_COUNT)
     {
@@ -107,20 +107,20 @@ static BOOLEAN add_device(LPTSTR path)
         return FALSE;
     }
 
-    struct hid_device *device = hid_open_device(path, TRUE, FALSE);
+    struct hid_device *device = hid_open_device(device_info, TRUE, FALSE);
     if (device == NULL)
     {
-        if (hid_reenable_device(path))
+        if (hid_reenable_device(device_info))
         {
-            device = hid_open_device(path, TRUE, FALSE);
+            device = hid_open_device(device_info, TRUE, FALSE);
             if (device == NULL)
             {
-                device = hid_open_device(path, TRUE, TRUE);
+                device = hid_open_device(device_info, TRUE, TRUE);
             }
         }
         else
         {
-            device = hid_open_device(path, TRUE, TRUE);
+            device = hid_open_device(device_info, TRUE, TRUE);
         }
     }
 
@@ -160,7 +160,7 @@ static BOOLEAN add_device(LPTSTR path)
     active_device->tray_menu = (struct tray_menu *)malloc(sizeof(struct tray_menu));
     memset(active_device->tray_menu, 0, sizeof(struct tray_menu));
     active_device->tray_menu->text = active_device->tray_text;
-    active_device->hid_hidden = hid_hide_bind(device->path) == HID_HIDE_RESULT_OK;
+    active_device->hid_hidden = hid_hide_bind(device->device_info) == HID_HIDE_RESULT_OK;
 
     AcquireSRWLockExclusive(&active_devices_lock);
     active_devices[active_device_count++] = active_device;
@@ -191,7 +191,7 @@ static BOOLEAN remove_device(int mi_gamepad_id)
         {
             if (active_devices[i]->hid_hidden)
             {
-                hid_hide_unbind(active_devices[i]->src_device->path);
+                hid_hide_unbind(active_devices[i]->src_device->device_info);
             }
             hid_close_device(active_devices[i]->src_device);
             hid_free_device(active_devices[i]->src_device);
@@ -233,7 +233,7 @@ static void refresh_devices()
         cur = device_info;
         while (cur != NULL)
         {
-            if (_tcscmp(active_devices[i]->src_device->path, cur->path) == 0)
+            if (_tcscmp(active_devices[i]->src_device->device_info->symlink, cur->symlink) == 0)
             {
                 found = TRUE;
                 break;
@@ -255,7 +255,7 @@ static void refresh_devices()
         AcquireSRWLockShared(&active_devices_lock);
         for (int i = 0; i < active_device_count; i++)
         {
-            if (_tcscmp(cur->path, active_devices[i]->src_device->path) == 0)
+            if (_tcscmp(cur->symlink, active_devices[i]->src_device->device_info->symlink) == 0)
             {
                 found = TRUE;
                 break;
@@ -264,7 +264,7 @@ static void refresh_devices()
         ReleaseSRWLockShared(&active_devices_lock);
         if (!found)
         {
-            add_device(cur->path);
+            add_device(cur);
         }
         cur = cur->next;
     }
@@ -444,7 +444,7 @@ int main()
         hid_hide_connected = TRUE;
     }
     refresh_devices();
-    tray_register_device_notification(hid_get_class(), device_change_cb);
+    tray_register_device_notification(hid_get_interface_guid(), device_change_cb);
 
     while (tray_loop(TRUE) == 0)
     {
@@ -456,7 +456,7 @@ int main()
     {
         if (active_devices[i]->hid_hidden)
         {
-            hid_hide_unbind(active_devices[i]->src_device->path);
+            hid_hide_unbind(active_devices[i]->src_device->device_info);
         }
         hid_close_device(active_devices[i]->src_device);
         hid_free_device(active_devices[i]->src_device);

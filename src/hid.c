@@ -5,6 +5,7 @@
 #include <setupapi.h>
 #include <devpkey.h>
 #include <cfgmgr32.h>
+#include <devguid.h>
 
 #include "hid.h"
 #include "utils.h"
@@ -14,29 +15,16 @@
 #pragma comment(lib, "setupapi.lib")
 #pragma comment(lib, "cfgmgr32.lib")
 
-static BOOLEAN got_hid_class = FALSE;
-static GUID hid_class;
+static BOOLEAN got_hid_interface_guid = FALSE;
+static GUID hid_interface_guid;
 
-GUID hid_get_class()
+static void _hid_fill_symlink_and_desc(struct hid_device_info *dev_info)
 {
-    if (!got_hid_class)
-    {
-        HidD_GetHidGuid(&hid_class);
-        got_hid_class = TRUE;
-    }
-    return hid_class;
-}
-
-struct hid_device_info *hid_enumerate(const LPTSTR *path_filters)
-{
-    struct hid_device_info *root_dev = NULL;
-    struct hid_device_info *cur_dev = NULL;
-
-    GUID class_guid = hid_get_class();
+    GUID interface_guid = hid_get_interface_guid();
+    HDEVINFO device_info_set = INVALID_HANDLE_VALUE;
     SP_DEVINFO_DATA devinfo_data;
     SP_DEVICE_INTERFACE_DATA device_interface_data;
     SP_DEVICE_INTERFACE_DETAIL_DATA *device_interface_detail_data = NULL;
-    HDEVINFO device_info_set = INVALID_HANDLE_VALUE;
     DWORD required_size = 0;
     DEVPROPTYPE prop_type;
     LPTSTR desc_buffer = NULL;
@@ -46,17 +34,17 @@ struct hid_device_info *hid_enumerate(const LPTSTR *path_filters)
     devinfo_data.cbSize = sizeof(SP_DEVINFO_DATA);
     device_interface_data.cbSize = sizeof(SP_DEVICE_INTERFACE_DATA);
 
-    device_info_set = SetupDiGetClassDevs(&class_guid, NULL, NULL, DIGCF_PRESENT | DIGCF_DEVICEINTERFACE);
+    device_info_set = SetupDiGetClassDevs(&interface_guid, dev_info->instance_path, NULL, DIGCF_PRESENT | DIGCF_DEVICEINTERFACE);
     if (device_info_set == INVALID_HANDLE_VALUE)
     {
-        return NULL;
+        return;
     }
 
     DWORD device_index = 0;
     while (SetupDiEnumDeviceInfo(device_info_set, device_index, &devinfo_data))
     {
         DWORD device_interface_index = 0;
-        while (SetupDiEnumDeviceInterfaces(device_info_set, &devinfo_data, &class_guid, device_interface_index, &device_interface_data))
+        while (SetupDiEnumDeviceInterfaces(device_info_set, &devinfo_data, &interface_guid, device_interface_index, &device_interface_data))
         {
             SetupDiGetDeviceInterfaceDetail(device_info_set, &device_interface_data, NULL, 0, &required_size, NULL);
             device_interface_detail_data = (SP_DEVICE_INTERFACE_DETAIL_DATA *)malloc(required_size);
@@ -64,74 +52,45 @@ struct hid_device_info *hid_enumerate(const LPTSTR *path_filters)
 
             if (SetupDiGetDeviceInterfaceDetail(device_info_set, &device_interface_data, device_interface_detail_data, required_size, NULL, NULL))
             {
-                BOOLEAN matched = TRUE;
-                if (path_filters != NULL)
-                {
-                    matched = FALSE;
-                    for (const LPTSTR *pfilter = path_filters; *pfilter != NULL; pfilter++)
-                    {
-                        if (_tcsistr(device_interface_detail_data->DevicePath, *pfilter) != NULL)
-                        {
-                            matched = TRUE;
-                            break;
-                        }
-                    }
-                }
+                desc_buffer = NULL;
 
-                if (matched)
+                if (SetupDiGetDevicePropertyW(device_info_set, &devinfo_data, &DEVPKEY_Device_BusReportedDeviceDesc,
+                                              &prop_type, NULL, 0, &required_size, 0))
                 {
-                    desc_buffer = NULL;
-
-                    if (SetupDiGetDevicePropertyW(device_info_set, &devinfo_data, &DEVPKEY_Device_BusReportedDeviceDesc,
-                                                  &prop_type, NULL, 0, &required_size, 0))
-                    {
-                        desc_buffer_w = (LPWSTR)malloc(required_size);
-                        memset(desc_buffer_w, 0, required_size);
-                        SetupDiGetDevicePropertyW(device_info_set, &devinfo_data, &DEVPKEY_Device_BusReportedDeviceDesc,
-                                                  &prop_type, (PBYTE)desc_buffer_w, required_size, NULL, 0);
+                    desc_buffer_w = (LPWSTR)malloc(required_size);
+                    memset(desc_buffer_w, 0, required_size);
+                    SetupDiGetDevicePropertyW(device_info_set, &devinfo_data, &DEVPKEY_Device_BusReportedDeviceDesc,
+                                              &prop_type, (PBYTE)desc_buffer_w, required_size, NULL, 0);
 #ifdef UNICODE
-                        desc_buffer = desc_buffer_w;
+                    desc_buffer = desc_buffer_w;
 #else
-                        int desc_buffer_size = WideCharToMultiByte(CP_ACP, 0, desc_buffer_w, -1, desc_buffer, 0, NULL, NULL);
-                        desc_buffer = (LPSTR)malloc(desc_buffer_size);
-                        WideCharToMultiByte(CP_ACP, 0, desc_buffer_w, -1, desc_buffer, desc_buffer_size, NULL, NULL);
-                        free(desc_buffer_w);
+                    int desc_buffer_size = WideCharToMultiByte(CP_ACP, 0, desc_buffer_w, -1, desc_buffer, 0, NULL, NULL);
+                    desc_buffer = (LPSTR)malloc(desc_buffer_size);
+                    WideCharToMultiByte(CP_ACP, 0, desc_buffer_w, -1, desc_buffer, desc_buffer_size, NULL, NULL);
+                    free(desc_buffer_w);
 #endif /* UNICODE */
-                    }
-
-                    if (desc_buffer == NULL || _tcslen(desc_buffer) == 0)
-                    {
-                        if (desc_buffer != NULL)
-                        {
-                            free(desc_buffer);
-                        }
-                        if (SetupDiGetDeviceRegistryProperty(device_info_set, &devinfo_data, SPDRP_DEVICEDESC,
-                                                             NULL, NULL, 0, &required_size)
-                            || GetLastError() == ERROR_INSUFFICIENT_BUFFER)
-                        {
-                            desc_buffer = (LPTSTR)malloc(required_size);
-                            memset(desc_buffer, 0, required_size);
-                            SetupDiGetDeviceRegistryProperty(device_info_set, &devinfo_data, SPDRP_DEVICEDESC,
-                                                             NULL, (PBYTE)desc_buffer, required_size, NULL);
-                        }
-                    }
-
-                    struct hid_device_info *dev = (struct hid_device_info *)malloc(sizeof(struct hid_device_info));
-                    dev->path = (LPTSTR)malloc((_tcslen(device_interface_detail_data->DevicePath) + 1) * sizeof(TCHAR));
-                    _tcscpy(dev->path, device_interface_detail_data->DevicePath);
-                    dev->description = desc_buffer;
-                    dev->next = NULL;
-
-                    if (root_dev == NULL)
-                    {
-                        root_dev = dev;
-                    }
-                    else
-                    {
-                        cur_dev->next = dev;
-                    }
-                    cur_dev = dev;
                 }
+
+                if (desc_buffer == NULL || _tcslen(desc_buffer) == 0)
+                {
+                    if (desc_buffer != NULL)
+                    {
+                        free(desc_buffer);
+                    }
+                    if (SetupDiGetDeviceRegistryProperty(device_info_set, &devinfo_data, SPDRP_DEVICEDESC,
+                                                         NULL, NULL, 0, &required_size)
+                        || GetLastError() == ERROR_INSUFFICIENT_BUFFER)
+                    {
+                        desc_buffer = (LPTSTR)malloc(required_size);
+                        memset(desc_buffer, 0, required_size);
+                        SetupDiGetDeviceRegistryProperty(device_info_set, &devinfo_data, SPDRP_DEVICEDESC,
+                                                         NULL, (PBYTE)desc_buffer, required_size, NULL);
+                    }
+                }
+
+                dev_info->symlink = (LPTSTR)malloc((_tcslen(device_interface_detail_data->DevicePath) + 1) * sizeof(TCHAR));
+                _tcscpy(dev_info->symlink, device_interface_detail_data->DevicePath);
+                dev_info->description = desc_buffer;
             }
 
             free(device_interface_detail_data);
@@ -143,59 +102,140 @@ struct hid_device_info *hid_enumerate(const LPTSTR *path_filters)
     }
 
     SetupDiDestroyDeviceInfoList(device_info_set);
+}
 
+static void _hid_fill_container_path(struct hid_device_info *dev_info)
+{
+    DEVINST dev_inst;
+    DEVINST dev_inst_parent;
+    DEVPROPTYPE prop_type;
+    ULONG required_size = 0;
+    
+    if (CM_Locate_DevNode(&dev_inst, dev_info->instance_path, CM_LOCATE_DEVNODE_PHANTOM) == CR_SUCCESS)
+    {
+        if (CM_Get_Parent(&dev_inst_parent, dev_inst, 0) == CR_SUCCESS)
+        {
+            CM_Get_DevNode_PropertyW(dev_inst_parent, &DEVPKEY_Device_InstanceId, &prop_type, NULL, &required_size, 0);
+            LPWSTR container_path_w = (LPWSTR)malloc(required_size);
+            if (CM_Get_DevNode_PropertyW(dev_inst_parent, &DEVPKEY_Device_InstanceId, &prop_type, (PBYTE)container_path_w, &required_size, 0) == CR_SUCCESS
+                && prop_type == DEVPROP_TYPE_STRING)
+            {
+#ifdef UNICODE
+                dev_info->container_instance_path = container_path_w;
+#else
+                int container_path_size = WideCharToMultiByte(CP_ACP, 0, container_path_w, -1, NULL, 0, NULL, NULL);
+                dev_info->container_instance_path = (LPSTR)malloc(container_path_size);
+                WideCharToMultiByte(CP_ACP, 0, container_path_w, -1, dev_info->container_instance_path, container_path_size, NULL, NULL);
+                free(container_path_w);
+#endif /* UNICODE */
+            }
+            else
+            {
+                free(container_path_w);
+            }
+        }
+    }
+}
+
+GUID hid_get_interface_guid()
+{
+    if (!got_hid_interface_guid)
+    {
+        HidD_GetHidGuid(&hid_interface_guid);
+        got_hid_interface_guid = TRUE;
+    }
+    return hid_interface_guid;
+}
+
+struct hid_device_info *hid_enumerate(const LPTSTR *path_filters)
+{
+    struct hid_device_info *root_dev = NULL;
+    struct hid_device_info *cur_dev = NULL;
+
+    LPTSTR class_filter = _guid_to_str(&GUID_DEVCLASS_HIDCLASS);
+    DWORD required_size = 0;
+
+    if (CM_Get_Device_ID_List_Size(&required_size, class_filter, CM_GETIDLIST_FILTER_CLASS) == CR_SUCCESS)
+    {
+        LPTSTR dev_id_list_buffer = (LPTSTR)malloc(required_size * sizeof(TCHAR));
+        if (CM_Get_Device_ID_List(class_filter, dev_id_list_buffer, required_size, CM_GETIDLIST_FILTER_CLASS) == CR_SUCCESS)
+        {
+            for (DWORD i = 0, start = 0; i < required_size; i++)
+            {
+                if (dev_id_list_buffer[i] == 0)
+                {
+                    if (i > start)
+                    {
+                        BOOLEAN matched = TRUE;
+                        if (path_filters != NULL)
+                        {
+                            matched = FALSE;
+                            for (const LPTSTR *pfilter = path_filters; *pfilter != NULL; pfilter++)
+                            {
+                                if (_tcsistr(&dev_id_list_buffer[start], *pfilter) != NULL)
+                                {
+                                    matched = TRUE;
+                                    break;
+                                }
+                            }
+                        }
+
+                        if (matched)
+                        {
+                            struct hid_device_info *dev = (struct hid_device_info *)malloc(sizeof(struct hid_device_info));
+                            memset(dev, 0, sizeof(struct hid_device_info));
+                            dev->instance_path = (LPTSTR)malloc((i - start + 1) * sizeof(TCHAR));
+                            _tcscpy(dev->instance_path, &dev_id_list_buffer[start]);
+                            _hid_fill_symlink_and_desc(dev);
+                            _hid_fill_container_path(dev);
+                            dev->next = NULL;
+
+                            if (dev->symlink != NULL)
+                            {
+                                if (root_dev == NULL)
+                                {
+                                    root_dev = dev;
+                                }
+                                else
+                                {
+                                    cur_dev->next = dev;
+                                }
+                                cur_dev = dev;
+                            }
+                            else
+                            {
+                                hid_free_device_info(dev);
+                            }
+                        }
+                    }
+                    start = i + 1;
+                }
+            }
+        }
+    }
+
+    free(class_filter);
     return root_dev;
 }
 
-BOOLEAN hid_reenable_device(LPTSTR path)
+BOOLEAN hid_reenable_device(struct hid_device_info *device_info)
 {
-    GUID class_guid = hid_get_class();
+    GUID interface_guid = hid_get_interface_guid();
     SP_DEVINFO_DATA devinfo_data;
     HDEVINFO device_info_set = INVALID_HANDLE_VALUE;
     DWORD required_size = 0;
-    LPWSTR path_w;
-    LPTSTR inst_id = NULL;
 
     memset(&devinfo_data, 0x0, sizeof(devinfo_data));
     devinfo_data.cbSize = sizeof(SP_DEVINFO_DATA);
 
-#ifdef UNICODE
-    path_w = path;
-#else
-    int path_length = strlen(path);
-    path_w = malloc((path_length + 1) * sizeof(WCHAR));
-    MultiByteToWideChar(CP_ACP, 0, path, -1, path_w, path_length + 1);
-#endif /* UNICODE */
-
-    DEVPROPTYPE prop_type;
-    CM_Get_Device_Interface_PropertyW(path_w, &DEVPKEY_Device_InstanceId, &prop_type, NULL, &required_size, 0);
-    LPWSTR inst_id_w = (LPWSTR)malloc(required_size);
-    if (CM_Get_Device_Interface_PropertyW(path_w, &DEVPKEY_Device_InstanceId, &prop_type, (PBYTE)inst_id_w, &required_size, 0) != CR_SUCCESS)
-    {
-        free(inst_id_w);
-        return FALSE;
-    }
-
-#ifdef UNICODE
-    inst_id = inst_id_w;
-#else
-    free(path_w);
-    int inst_id_size = WideCharToMultiByte(CP_ACP, 0, inst_id_w, -1, inst_id, 0, NULL, NULL);
-    inst_id = (LPSTR)malloc(inst_id_size);
-    WideCharToMultiByte(CP_ACP, 0, inst_id_w, -1, inst_id, inst_id_size, NULL, NULL);
-    free(inst_id_w);
-#endif /* UNICODE */
-
-    device_info_set = SetupDiGetClassDevs(&class_guid, inst_id, NULL, DIGCF_PRESENT | DIGCF_DEVICEINTERFACE);
+    device_info_set = SetupDiGetClassDevs(&interface_guid, device_info->instance_path, NULL, DIGCF_PRESENT | DIGCF_DEVICEINTERFACE);
     if (device_info_set == INVALID_HANDLE_VALUE)
     {
-        free(inst_id);
         return FALSE;
     }
 
     if (!SetupDiEnumDeviceInfo(device_info_set, 0, &devinfo_data) || SetupDiEnumDeviceInfo(device_info_set, 1, &devinfo_data))
     {
-        free(inst_id);
         SetupDiDestroyDeviceInfoList(device_info_set);
         return FALSE;
     }
@@ -220,14 +260,13 @@ BOOLEAN hid_reenable_device(LPTSTR path)
                                               sizeof(SP_PROPCHANGE_PARAMS));
     res = res && SetupDiCallClassInstaller(DIF_PROPERTYCHANGE, device_info_set, &devinfo_data);
 
-    free(inst_id);
     SetupDiDestroyDeviceInfoList(device_info_set);
     return res;
 }
 
-BOOLEAN check_vendor_and_product(LPTSTR path, USHORT vendor_id, USHORT product_id)
+BOOLEAN check_vendor_and_product(struct hid_device_info *device_info, USHORT vendor_id, USHORT product_id)
 {
-    HANDLE dev_handle = CreateFile(path, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, 0);
+    HANDLE dev_handle = CreateFile(device_info->symlink, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, 0);
     if (dev_handle != INVALID_HANDLE_VALUE)
     {
         BOOLEAN matched = FALSE;
@@ -248,14 +287,43 @@ BOOLEAN check_vendor_and_product(LPTSTR path, USHORT vendor_id, USHORT product_i
     }
 }
 
+struct hid_device_info *hid_clone_device_info(struct hid_device_info *device_info)
+{
+    struct hid_device_info *result = (struct hid_device_info *)malloc(sizeof(struct hid_device_info));
+    memset(result, 0, sizeof(struct hid_device_info));
+    if (device_info->instance_path != NULL)
+    {
+        result->instance_path = (LPTSTR)malloc((_tcslen(device_info->instance_path) + 1) * sizeof(TCHAR));
+        _tcscpy(result->instance_path, device_info->instance_path);
+    }
+    if (device_info->container_instance_path != NULL)
+    {
+        result->container_instance_path = (LPTSTR)malloc((_tcslen(device_info->container_instance_path) + 1) * sizeof(TCHAR));
+        _tcscpy(result->container_instance_path, device_info->container_instance_path);
+    }
+    if (device_info->symlink != NULL)
+    {
+        result->symlink = (LPTSTR)malloc((_tcslen(device_info->symlink) + 1) * sizeof(TCHAR));
+        _tcscpy(result->symlink, device_info->symlink);
+    }
+    if (device_info->description != NULL)
+    {
+        result->description = (LPTSTR)malloc((_tcslen(device_info->description) + 1) * sizeof(TCHAR));
+        _tcscpy(result->description, device_info->description);
+    }
+    return result;
+}
+
 void hid_free_device_info(struct hid_device_info *device_info)
 {
+    free(device_info->instance_path);
+    free(device_info->container_instance_path);
+    free(device_info->symlink);
     free(device_info->description);
-    free(device_info->path);
     free(device_info);
 }
 
-struct hid_device *hid_open_device(LPTSTR path, BOOLEAN access_rw, BOOLEAN shared)
+struct hid_device *hid_open_device(struct hid_device_info *device_info, BOOLEAN access_rw, BOOLEAN shared)
 {
     DWORD desired_access = access_rw ? (GENERIC_WRITE | GENERIC_READ) : 0;
     DWORD share_mode = shared ? (FILE_SHARE_READ | FILE_SHARE_WRITE) : 0;
@@ -265,7 +333,7 @@ struct hid_device *hid_open_device(LPTSTR path, BOOLEAN access_rw, BOOLEAN share
         .lpSecurityDescriptor = NULL,
         .bInheritHandle = TRUE
     };
-    HANDLE handle = CreateFile(path, desired_access, share_mode, &security, OPEN_EXISTING, FILE_FLAG_OVERLAPPED, 0);
+    HANDLE handle = CreateFile(device_info->symlink, desired_access, share_mode, &security, OPEN_EXISTING, FILE_FLAG_OVERLAPPED, 0);
     if (handle == INVALID_HANDLE_VALUE)
     {
         return NULL;
@@ -287,8 +355,7 @@ struct hid_device *hid_open_device(LPTSTR path, BOOLEAN access_rw, BOOLEAN share
     }
 
     struct hid_device *dev = (struct hid_device *)malloc(sizeof(struct hid_device));
-    dev->path = (LPTSTR)malloc((_tcslen(path) + 1) * sizeof(TCHAR));
-    _tcscpy(dev->path, path);
+    dev->device_info = hid_clone_device_info(device_info);
     dev->handle = handle;
     dev->read_pending = FALSE;
     dev->input_report_size = caps.InputReportByteLength;
@@ -403,7 +470,7 @@ void hid_close_device(struct hid_device *device)
 
 void hid_free_device(struct hid_device *device)
 {
-    free(device->path);
+    hid_free_device_info(device->device_info);
     free(device->input_buffer);
     free(device->output_buffer);
     free(device->feature_buffer);
